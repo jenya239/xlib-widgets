@@ -73,7 +73,7 @@ module_files_flags = module_map.map { |name, path| "-fmodule-file=#{name}=#{path
 module_files_list  = module_map.values.join(' ')
 
 # Итоговая команда
-build_commands << "clang++ -std=c++20 #{main_file} #{module_files_flags} #{module_files_list} -o #{output_executable}"
+build_commands << "clang++ -std=c++20 #{main_file} #{module_files_flags} #{module_files_list} -lX11 -o #{output_executable}"
 
 
 # Выводим команды для выполнения
