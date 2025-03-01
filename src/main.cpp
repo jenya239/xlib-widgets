@@ -5,18 +5,26 @@
 
 import ui.widget;
 import ui.event;
+import ui.button;  // Add this import
 import core.ioc_container;
 import services.xdisplay_service;
 import services.event_loop_service;
 import services.logger_service;
 
-class Button : public Widget {
+// Create a custom button with specific behavior
+class MyButton : public Button {
+private:
+    std::shared_ptr<LoggerService> logger;
+
 public:
-    void handleEvent(const Event& event) override {
-        if (event.type == "click") {
-            std::cout << "Button clicked!\n";
+    MyButton(std::string label, std::shared_ptr<LoggerService> logger) 
+        : Button(std::move(label)), logger(logger) {
+
+             // Определяем поведение для onClick
+            onClick = [this, logger]() {
+                logger->info("Button clicked: " + getLabel());
+            };
         }
-    }
 };
 
 int main() {
@@ -30,11 +38,11 @@ int main() {
     // Register EventLoopService
     auto eventLoopService = std::make_shared<EventLoopService>(displayService);
     ioc.registerSingleton<EventLoopService>(eventLoopService);
-
+    
     // Register LoggerService
     auto loggerService = std::make_shared<LoggerService>();
     ioc.registerSingleton<LoggerService>(loggerService);
-
+    
     // Log some information
     loggerService->info("Application starting up");
     loggerService->debug("Display service initialized");
@@ -43,24 +51,51 @@ int main() {
     Window window = displayService->createWindow(100, 100, 400, 300);
     displayService->mapWindow(window);
     
+    // Create graphics context
+    GC gc = displayService->createGC(window);
+    
     // Create UI hierarchy
     auto root = std::make_shared<Widget>();
-    auto button = std::make_shared<Button>();
+    
+    // Create a button and position it
+    auto button = std::make_shared<MyButton>("Click Me", loggerService);
+    button->setPosition(50, 50);
+    button->setSize(100, 40);
     root->addChild(button);
     
+    // Create another button
+    auto exitButton = std::make_shared<MyButton>("Exit", loggerService);
+    exitButton->setPosition(50, 120);
+    exitButton->setSize(100, 40);
+    exitButton->onClick = [&eventLoopService]() {
+        eventLoopService->stop();
+    };
+    root->addChild(exitButton);
+    
     // Register event handler for the window
-    eventLoopService->registerEventHandler(window, [root](const Event& event) {
-        root->handleEvent(event);
+    eventLoopService->registerEventHandler(window, [root, displayService, window](const Event& event) {
+        if (event.type == "paint") {
+            // Handle paint events
+            Display* display = displayService->getDisplay();
+            GC gc = displayService->createGC(window);
+            root->paint(display, window, gc);
+        } else {
+            // Handle other events
+            root->handleEvent(event);
+        }
     });
     
     // Select input events for the window
-    XSelectInput(displayService->getDisplay(), window, ExposureMask | ButtonPressMask | KeyPressMask);
+    XSelectInput(displayService->getDisplay(), window, 
+                 ExposureMask | ButtonPressMask | KeyPressMask);
     
     // Flush pending operations
     displayService->flush();
     
-    std::cout << "Starting event loop...\n";
+    loggerService->info("Starting event loop...");
     eventLoopService->start();
+    
+    loggerService->info("Application shutting down");
     
     return 0;
 }

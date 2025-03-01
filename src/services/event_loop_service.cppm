@@ -50,14 +50,14 @@ public:
 
 private:
     Event convertXEventToEvent(const XEvent& xEvent) {
-        // Simple conversion from XEvent to our custom Event
+        // Enhanced conversion from XEvent to our custom Event
         switch (xEvent.type) {
             case ButtonPress:
-                return Event("click");
+                return Event("click", xEvent.xbutton.x, xEvent.xbutton.y);
             case KeyPress:
-                return Event("keypress");
+                return Event("keypress", xEvent.xkey.x, xEvent.xkey.y);
             case Expose:
-                return Event("paint");
+                return Event("paint", xEvent.xexpose.x, xEvent.xexpose.y);
             default:
                 return Event("unknown");
         }

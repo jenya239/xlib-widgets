@@ -55,7 +55,7 @@ sorted.each do |mod|
   deps_flags = modules[mod][:imports].map { |dep| "-fmodule-file=#{dep}=#{compiled_modules[dep]}" if compiled_modules[dep] }.compact.join(' ')
 
   # Команда для предварительной компиляции модуля с зависимостями
-  build_commands << "clang++ -std=c++20 #{file} --precompile #{deps_flags} -o #{output_file}"
+  build_commands << "clang++ -std=c++20 #{file} --precompile #{deps_flags} -lX11 -o #{output_file}"
 
   # Запоминаем путь к скомпилированному .pcm
   compiled_modules[mod] = output_file

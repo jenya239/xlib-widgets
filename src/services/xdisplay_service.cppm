@@ -74,4 +74,29 @@ public:
     void flush() {
         XFlush(display);
     }
+
+    // Create a graphics context
+    GC createGC(Window window) {
+        return XCreateGC(display, window, 0, nullptr);
+    }
+
+    // Draw rectangle
+    void drawRectangle(Window window, GC gc, int x, int y, unsigned int width, unsigned int height) {
+        XDrawRectangle(display, window, gc, x, y, width, height);
+    }
+
+    // Fill rectangle
+    void fillRectangle(Window window, GC gc, int x, int y, unsigned int width, unsigned int height) {
+        XFillRectangle(display, window, gc, x, y, width, height);
+    }
+
+    // Set foreground color
+    void setForeground(GC gc, unsigned long color) {
+        XSetForeground(display, gc, color);
+    }
+
+    // Draw text
+    void drawText(Window window, GC gc, int x, int y, const std::string& text) {
+        XDrawString(display, window, gc, x, y, text.c_str(), text.length());
+    }
 };

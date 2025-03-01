@@ -14,7 +14,7 @@ export enum class LogLevel {
 
 export class LoggerService {
 private:
-    LogLevel currentLevel = LogLevel::INFO;
+    LogLevel currentLevel = LogLevel::DEBUG;
 
 public:
     void setLogLevel(LogLevel level) {
