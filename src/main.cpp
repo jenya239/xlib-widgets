@@ -36,27 +36,27 @@ int main() {
         button->setSize(200, 50);
 
         // Настраиваем обработчики событий для кнопки
-        button->onClick = [&logger]() {
+        button->setOnClick([&logger]() {
             logger->info("Button clicked!");
-        };
+        });
 
-        button->onMouseEnter = [&logger, button]() {
+        button->setOnMouseEnter([&logger, button]() {
             logger->info("Mouse entered button: " + button->getLabel());
             logger->debug("Button state changed to HOVER");
-        };
+        });
 
-        button->onMouseLeave = [&logger, button]() {
+        button->setOnMouseLeave([&logger, button]() {
             logger->info("Mouse left button: " + button->getLabel());
             logger->debug("Button state changed to NORMAL");
-        };
+        });
 
-        button->onMouseDown = [&logger]() {
+        button->setOnMouseDown([&logger]() {
             logger->debug("Button state changed to PRESSED");
-        };
+        });
 
-        button->onMouseUp = [&logger]() {
+        button->setOnMouseUp([&logger]() {
             logger->debug("Button state changed to HOVER (after press)");
-        };
+        });
 
         // Добавляем кнопку в окно
         mainWindow->addChild(button);

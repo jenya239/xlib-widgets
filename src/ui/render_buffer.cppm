@@ -1,9 +1,10 @@
-// src/ui/render_buffer.cppm
 module;
 #include <X11/Xlib.h>
 #include <memory>
 #include <stdexcept>
 #include <iostream>
+#include <string>
+#include <X11/Xft/Xft.h>
 
 export module ui.render_buffer;
 
@@ -15,6 +16,7 @@ private:
     unsigned int width;
     unsigned int height;
     bool valid = true;  // Флаг для проверки валидности буфера
+    XftDraw* xftDraw = nullptr;
 
 public:
     RenderBuffer(Display* display, ::Window window, unsigned int width, unsigned int height)
@@ -44,6 +46,17 @@ public:
             throw std::runtime_error("Failed to create graphics context");
         }
 
+        // Create XftDraw for text rendering
+        Visual* visual = DefaultVisual(display, DefaultScreen(display));
+        Colormap colormap = DefaultColormap(display, DefaultScreen(display));
+        xftDraw = XftDrawCreate(display, pixmap, visual, colormap);
+
+        if (!xftDraw) {
+            XFreeGC(display, gc);
+            XFreePixmap(display, pixmap);
+            throw std::runtime_error("Failed to create Xft draw context");
+        }
+
         // Clear the pixmap initially
         XSetForeground(display, gc, WhitePixel(display, DefaultScreen(display)));
         XFillRectangle(display, pixmap, gc, 0, 0, width, height);
@@ -51,6 +64,9 @@ public:
 
     ~RenderBuffer() {
         if (valid) {
+            if (xftDraw) {
+                XftDrawDestroy(xftDraw);
+            }
             XFreeGC(display, gc);
             XFreePixmap(display, pixmap);
         }
@@ -63,9 +79,11 @@ public:
     // Moving is allowed
     RenderBuffer(RenderBuffer&& other) noexcept
         : display(other.display), pixmap(other.pixmap), gc(other.gc),
-          width(other.width), height(other.height), valid(other.valid) {
+          width(other.width), height(other.height), valid(other.valid),
+          xftDraw(other.xftDraw) {
         other.pixmap = 0;
         other.gc = nullptr;
+        other.xftDraw = nullptr;
         other.valid = false;
     }
 
@@ -73,6 +91,9 @@ public:
         if (this != &other) {
             // Clean up current resources
             if (valid) {
+                if (xftDraw) {
+                    XftDrawDestroy(xftDraw);
+                }
                 XFreeGC(display, gc);
                 XFreePixmap(display, pixmap);
             }
@@ -84,10 +105,12 @@ public:
             width = other.width;
             height = other.height;
             valid = other.valid;
+            xftDraw = other.xftDraw;
 
             // Invalidate other
             other.pixmap = 0;
             other.gc = nullptr;
+            other.xftDraw = nullptr;
             other.valid = false;
         }
         return *this;
@@ -105,6 +128,83 @@ public:
 
         XSetForeground(display, gc, color);
         XFillRectangle(display, pixmap, gc, 0, 0, width, height);
+    }
+
+    // Добавленные методы для рисования
+
+    // Рисование линии
+    void drawLine(int x1, int y1, int x2, int y2, unsigned long color) {
+        if (!valid) return;
+
+        XSetForeground(display, gc, color);
+        XDrawLine(display, pixmap, gc, x1, y1, x2, y2);
+    }
+
+    // Рисование прямоугольника (контур)
+    void drawRectangle(int x, int y, unsigned int width, unsigned int height, unsigned long color) {
+        if (!valid) return;
+
+        XSetForeground(display, gc, color);
+        XDrawRectangle(display, pixmap, gc, x, y, width, height);
+    }
+
+    // Рисование закрашенного прямоугольника
+    void fillRectangle(int x, int y, unsigned int width, unsigned int height, unsigned long color) {
+        if (!valid) return;
+
+        XSetForeground(display, gc, color);
+        XFillRectangle(display, pixmap, gc, x, y, width, height);
+    }
+
+    // Рисование текста с использованием Xft
+    void drawText(int x, int y, const std::string& text, XftFont* font, XftColor* color) {
+        if (!valid || !xftDraw || !font || !color) return;
+
+        XftDrawString8(xftDraw, color, font, x, y,
+                      (const FcChar8*)text.c_str(), text.length());
+    }
+
+    // Создание цвета Xft из RGB
+    XftColor* createXftColor(unsigned char r, unsigned char g, unsigned char b, unsigned char a = 255) {
+        XftColor* color = new XftColor();
+        XRenderColor renderColor;
+        renderColor.red = r * 257;    // Convert 0-255 to 0-65535
+        renderColor.green = g * 257;
+        renderColor.blue = b * 257;
+        renderColor.alpha = a * 257;
+
+        Colormap colormap = DefaultColormap(display, DefaultScreen(display));
+        XftColorAllocValue(display, DefaultVisual(display, DefaultScreen(display)),
+                          colormap, &renderColor, color);
+
+        return color;
+    }
+
+    // Освобождение цвета Xft
+    void freeXftColor(XftColor* color) {
+        if (color) {
+            Colormap colormap = DefaultColormap(display, DefaultScreen(display));
+            XftColorFree(display, DefaultVisual(display, DefaultScreen(display)),
+                        colormap, color);
+            delete color;
+        }
+    }
+
+    // Получение размеров текста
+    void getTextExtents(XftFont* font, const std::string& text,
+                        int& width, int& height, int& ascent, int& descent) {
+        if (!font) {
+            width = height = ascent = descent = 0;
+            return;
+        }
+
+        XGlyphInfo extents;
+        XftTextExtents8(display, font, (const FcChar8*)text.c_str(), text.length(), &extents);
+
+        width = extents.width;
+        height = extents.height;
+        ascent = font->ascent;
+        descent = font->descent;
     }
 
     void copyTo(Drawable dest, int srcX, int srcY, int destX, int destY,

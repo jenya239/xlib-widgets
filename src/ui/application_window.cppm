@@ -57,9 +57,9 @@ public:
         XStoreName(display, xWindow, title.c_str());
 
         // Выбираем события, которые хотим получать
-        XSelectInput(display, xWindow,
-            ExposureMask | ButtonPressMask | ButtonReleaseMask |
-            KeyPressMask | StructureNotifyMask | PointerMotionMask);
+        // В методе setupEventHandling или при создании окна
+        XSelectInput(display, xWindow, ExposureMask | ButtonPressMask | ButtonReleaseMask |
+                              PointerMotionMask | EnterWindowMask | LeaveWindowMask);
 
         // Отображаем окно
         XMapWindow(display, xWindow);

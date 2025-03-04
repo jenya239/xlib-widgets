@@ -5,6 +5,7 @@ module;
 #include <memory>
 #include <chrono>
 #include <thread>
+#include <iostream>
 
 export module services.event_loop_service;
 
@@ -48,8 +49,15 @@ public:
                 XEvent xEvent;
                 XNextEvent(display, &xEvent);
 
+                // Отладочный вывод для событий мыши
+                if (xEvent.type == ButtonPress) {
+                    std::cout << "X11 ButtonPress event received: button=" << xEvent.xbutton.button << std::endl;
+                } else if (xEvent.type == ButtonRelease) {
+                    std::cout << "X11 ButtonRelease event received: button=" << xEvent.xbutton.button << std::endl;
+                }
+
                 // Convert X11 event to our custom Event
-                Event event = convertXEvent(xEvent);
+                Event event(xEvent);
 
                 // Find and call the appropriate handler
                 auto it = eventHandlers.find(xEvent.xany.window);
@@ -74,44 +82,5 @@ public:
     // Stop the event loop
     void stop() {
         running = false;
-    }
-
-private:
-    // Convert X11 event to our custom Event
-    Event convertXEvent(const XEvent& xEvent) {
-        Event::Type type;
-        int x = 0, y = 0;
-
-        switch (xEvent.type) {
-            case Expose:
-                type = Event::Type::PaintEvent;
-                break;
-            case ButtonPress:
-                type = Event::Type::MouseDown;
-                x = xEvent.xbutton.x;
-                y = xEvent.xbutton.y;
-                break;
-            case ButtonRelease:
-                type = Event::Type::MouseUp;
-                x = xEvent.xbutton.x;
-                y = xEvent.xbutton.y;
-                break;
-            case MotionNotify:
-                type = Event::Type::MouseMove;
-                x = xEvent.xmotion.x;
-                y = xEvent.xmotion.y;
-                break;
-            case KeyPress:
-                type = Event::Type::KeyDown;
-                break;
-            case KeyRelease:
-                type = Event::Type::KeyUp;
-                break;
-            default:
-                type = Event::Type::Unknown;
-                break;
-        }
-
-        return Event(type, x, y);
     }
 };

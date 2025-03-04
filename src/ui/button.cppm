@@ -1,12 +1,13 @@
 module;
 #include <string>
 #include <X11/Xlib.h>
+#include <X11/Xft/Xft.h>
 #include <functional>
 #include <iostream>
+#include <algorithm>
 
 import ui.widget;
 import ui.event;
-import ui.event_listener;
 import ui.render_buffer;
 
 export module ui.button;
@@ -15,209 +16,296 @@ export module ui.button;
 export enum class ButtonState {
     Normal,
     Hover,
-    Pressed
+    Pressed,
+    Disabled
 };
 
 export class Button : public Widget {
 private:
     std::string label;
-    ButtonState state = ButtonState::Normal;  // Current button state
-    bool isMouseOver = false;  // Флаг для отслеживания нахождения мыши над кнопкой
+    ButtonState state = ButtonState::Normal;
+    bool isMouseOver = false;
+    bool isPressed = false;
+    XftFont* font = nullptr;
+    XftDraw* xftDraw = nullptr;
+
+    // Цвета для разных состояний кнопки
+    unsigned long normalColor = 0xCCCCCC;
+    unsigned long hoverColor = 0xAAAAAA;
+    unsigned long pressedColor = 0x777777;
+    unsigned long disabledColor = 0xEEEEEE;
+
+    // Xft цвета для текста
+    XftColor textColor;
+    XftColor disabledTextColor;
+
+    // Callbacks для различных событий
+    std::function<void()> onClick;
+    std::function<void()> onMouseEnter;
+    std::function<void()> onMouseLeave;
+    std::function<void()> onMouseDown;
+    std::function<void()> onMouseUp;
 
     // Проверяет, находится ли точка внутри кнопки
     bool isPointInside(int x, int y) const {
-        return x >= getX() && x < getX() + getWidth() &&
-               y >= getY() && y < getY() + getHeight();
+        int absX, absY;
+        getAbsolutePosition(absX, absY);
+        return x >= absX && x < absX + static_cast<int>(getWidth()) &&
+               y >= absY && y < absY + static_cast<int>(getHeight());
     }
 
-public:
-    explicit Button(std::string label) : label(std::move(label)) {}
-
-    void handleEvent(const Event& event) override {
-        // Проверяем, находится ли мышь внутри кнопки
-        bool isInside = isPointInside(event.getX(), event.getY());
-
-        if (event.getType() == Event::Type::MouseMove) {
-            // Обработка входа/выхода мыши
-            if (isInside && !isMouseOver) {
-                // Мышь вошла в область кнопки
-                isMouseOver = true;
-                setState(ButtonState::Hover);
-                std::cout << "DEBUG: Mouse entered button - setting state to Hover" << std::endl;
-                if (onMouseEnter) {
-                    onMouseEnter();
-                }
-            }
-            else if (!isInside && isMouseOver) {
-                // Мышь вышла из области кнопки
-                isMouseOver = false;
-                setState(ButtonState::Normal);
-                std::cout << "DEBUG: Mouse left button - setting state to Normal" << std::endl;
-                if (onMouseLeave) {
-                    onMouseLeave();
-                }
-            }
-            // Убираем лишний лог для MouseMove
-        }
-        else if (event.getType() == Event::Type::MouseDown && isInside) {
-            // Нажатие кнопки мыши внутри кнопки
-            setState(ButtonState::Pressed);
-            std::cout << "DEBUG: Mouse down on button - setting state to Pressed" << std::endl;
-            if (onMouseDown) {
-                onMouseDown();
-            }
-        }
-        else if (event.getType() == Event::Type::MouseUp) {
-            // Отпускание кнопки мыши
-            if (state == ButtonState::Pressed) {
-                if (isInside) {
-                    // Если мышь внутри кнопки, вызываем onClick и меняем состояние на Hover
-                    setState(ButtonState::Hover);
-                    std::cout << "DEBUG: Mouse up inside button - setting state to Hover" << std::endl;
-                    if (onClick) {
-                        onClick();
-                    }
-                    if (onMouseUp) {
-                        onMouseUp();
-                    }
-                } else {
-                    // Если мышь вне кнопки, просто меняем состояние на Normal
-                    setState(ButtonState::Normal);
-                    std::cout << "DEBUG: Mouse up outside button - setting state to Normal" << std::endl;
-                    if (onMouseUp) {
-                        onMouseUp();
-                    }
-                }
-            }
-        }
-
-        // Передаем событие дальше базовому классу для обработки дочерними виджетами
-        Widget::handleEvent(event);
-    }
-
-    // Set button state and mark as dirty if state changed
-    void setState(ButtonState newState) {
-        if (state != newState) {
-            ButtonState oldState = state;
-            state = newState;
-            std::cout << "DEBUG: Button state changed from " << static_cast<int>(oldState)
-                      << " to " << static_cast<int>(newState) << " - marking as dirty" << std::endl;
-            markDirty();  // Вызываем метод из базового класса Widget
-
-            // Явно запрашиваем перерисовку
-            std::cout << "DEBUG: needsRepaint() returns: " << (needsRepaint() ? "true" : "false") << std::endl;
-        }
-    }
-
-    // Override paintToBuffer to change appearance based on state
-    void paintToBuffer(Display* display) override {
-        std::cout << "DEBUG: Button::paintToBuffer called with state: " << static_cast<int>(state) << std::endl;
-
-        RenderBuffer* buffer = getBuffer();
-        if (!buffer) {
-            std::cout << "ERROR: Buffer is null in paintToBuffer! Creating new buffer." << std::endl;
-            ensureBuffer(display, getWindow());
-            buffer = getBuffer();
-            if (!buffer) {
-                std::cout << "ERROR: Failed to create buffer!" << std::endl;
+    // Инициализация шрифта и цветов
+    void initResources(Display* display) {
+        if (!font) {
+            // Загружаем шрифт (можно настроить размер и имя шрифта)
+            font = XftFontOpenName(display, DefaultScreen(display), "Sans-12");
+            if (!font) {
+                std::cerr << "Failed to load font" << std::endl;
                 return;
             }
         }
 
-        GC gc = buffer->getGC();
-        Pixmap pixmap = buffer->getPixmap();
+        // Инициализация цветов
+        XftColorAllocName(
+            display,
+            DefaultVisual(display, DefaultScreen(display)),
+            DefaultColormap(display, DefaultScreen(display)),
+            "#000000",
+            &textColor
+        );
 
-        std::cout << "DEBUG: Buffer GC: " << gc << ", Pixmap: " << pixmap << std::endl;
+        XftColorAllocName(
+            display,
+            DefaultVisual(display, DefaultScreen(display)),
+            DefaultColormap(display, DefaultScreen(display)),
+            "#777777",
+            &disabledTextColor
+        );
+    }
 
-        // Остальной код без изменений...
-        unsigned long bgColor;
-        switch (state) {
-            case ButtonState::Pressed:
-                bgColor = 0x777777;  // Темно-серый при нажатии
-                std::cout << "DEBUG: Using PRESSED color: 0x777777" << std::endl;
-                break;
-            case ButtonState::Hover:
-                bgColor = 0xAAAAAA;  // Светло-серый при наведении
-                std::cout << "DEBUG: Using HOVER color: 0xAAAAAA" << std::endl;
-                break;
-            case ButtonState::Normal:
-            default:
-                bgColor = 0xCCCCCC;  // Обычный серый
-                std::cout << "DEBUG: Using NORMAL color: 0xCCCCCC" << std::endl;
-                break;
-        }
-        unsigned long textColor = 0x000000;  // Черный текст
-
-        // Преобразуем цвета в формат X11
-        XColor xcolor;
-        Colormap colormap = DefaultColormap(display, DefaultScreen(display));
-
-        // Устанавливаем цвет фона
-        xcolor.red = ((bgColor >> 16) & 0xFF) * 256;
-        xcolor.green = ((bgColor >> 8) & 0xFF) * 256;
-        xcolor.blue = (bgColor & 0xFF) * 256;
-        xcolor.flags = DoRed | DoGreen | DoBlue;
-
-        if (XAllocColor(display, colormap, &xcolor)) {
-            std::cout << "DEBUG: Allocated background color: " << xcolor.pixel << std::endl;
-            XSetForeground(display, gc, xcolor.pixel);
-        } else {
-            std::cout << "ERROR: Failed to allocate background color!" << std::endl;
-            XSetForeground(display, gc, WhitePixel(display, DefaultScreen(display)));
+    // Освобождение ресурсов
+    void cleanupResources(Display* display) {
+        if (font) {
+            XftFontClose(display, font);
+            font = nullptr;
         }
 
-        // Draw button background
-        XFillRectangle(display, pixmap, gc, 0, 0, getWidth(), getHeight());
+        if (xftDraw) {
+            XftDrawDestroy(xftDraw);
+            xftDraw = nullptr;
+        }
 
-        // Устанавливаем цвет границы (черный)
-        XSetForeground(display, gc, BlackPixel(display, DefaultScreen(display)));
-        XDrawRectangle(display, pixmap, gc, 0, 0, getWidth() - 1, getHeight() - 1);
+        XftColorFree(
+            display,
+            DefaultVisual(display, DefaultScreen(display)),
+            DefaultColormap(display, DefaultScreen(display)),
+            &textColor
+        );
 
-        // Text position adjustment for pressed state (slight shift down/right)
-        int textX = (state == ButtonState::Pressed) ? 11 : 10;
-        int textY = (state == ButtonState::Pressed) ? getHeight() / 2 + 6 : getHeight() / 2 + 5;
-
-        // Draw button text
-        XSetForeground(display, gc, BlackPixel(display, DefaultScreen(display)));
-        XDrawString(display, pixmap, gc,
-                    textX, textY,
-                    label.c_str(), label.length());
-
-        std::cout << "DEBUG: Button painted with state: " << static_cast<int>(state) << std::endl;
+        XftColorFree(
+            display,
+            DefaultVisual(display, DefaultScreen(display)),
+            DefaultColormap(display, DefaultScreen(display)),
+            &disabledTextColor
+        );
     }
 
-    // Keep the old paint method for compatibility, but it will now use the buffer
-    void paint(Display* display, ::Window window, GC gc) override {
-//        std::cout << "DEBUG: Button::paint called" << std::endl;
+public:
+    Button(const std::string& buttonLabel = "", const std::string& id = "")
+        : Widget(id), label(buttonLabel) {}
 
-        // Вызываем render, чтобы обновить буфер, если нужно
-        render(display, window);
-
-        // Теперь вызываем базовый метод, который скопирует буфер на экран
-        Widget::paint(display, window, gc);
+    ~Button() {
+        // Ресурсы будут освобождены в cleanupResources
     }
 
-    // Переопределяем метод needsRepaint для отладки
-    bool needsRepaint() const override {
-        bool result = Widget::needsRepaint();
-        return result;
+    // Установка текста кнопки
+    void setLabel(const std::string& newLabel) {
+        if (label != newLabel) {
+            label = newLabel;
+            markDirty();
+        }
     }
 
-    // Переопределяем метод clearDirty для отладки
-    void clearDirty() override {
-        std::cout << "DEBUG: Button::clearDirty() called" << std::endl;
-        Widget::clearDirty();
-    }
-
-    // Геттер для получения текста кнопки
-    std::string getLabel() const {
+    const std::string& getLabel() const {
         return label;
     }
 
-    // Колбэки для различных событий
-    std::function<void()> onClick;
-    std::function<void()> onMouseEnter;
-    std::function<void()> onMouseLeave;
-    std::function<void()> onMouseDown;  // Добавлен новый колбэк
-    std::function<void()> onMouseUp;    // Добавлен новый колбэк
+    void setState(ButtonState newState) {
+        if (state != newState) {
+            std::cout << "Button state changed: " << static_cast<int>(state) << " -> " << static_cast<int>(newState) << std::endl;
+            state = newState;
+            markDirty();
+        }
+    }
+
+    ButtonState getState() const {
+        return state;
+    }
+
+    // Методы для установки обработчиков событий
+    void setOnClick(std::function<void()> handler) {
+        onClick = handler;
+    }
+
+    void setOnMouseEnter(std::function<void()> handler) {
+        onMouseEnter = handler;
+    }
+
+    void setOnMouseLeave(std::function<void()> handler) {
+        onMouseLeave = handler;
+    }
+
+    void setOnMouseDown(std::function<void()> handler) {
+        onMouseDown = handler;
+    }
+
+    void setOnMouseUp(std::function<void()> handler) {
+        onMouseUp = handler;
+    }
+
+    // Переопределение метода обработки событий
+    void handleEvent(const Event& event) override {
+        if (!isEnabled) return;
+
+        // Отладочный вывод
+//        std::cout << "Button::handleEvent called, event type: " << event.getNativeEvent().type << std::endl;
+
+        // Получаем XEvent из Event
+        Event::Type eventType = event.getType();
+
+        // Обработка событий мыши
+        if (eventType == Event::Type::MouseDown) {
+            if (isPointInside(event.getX(), event.getY()) && event.getButton() == Button1) {
+                std::cout << "MouseDown detected inside button" << std::endl;
+                isPressed = true;
+                setState(ButtonState::Pressed);
+                if (onMouseDown) onMouseDown();
+            }
+        }
+        else if (eventType == Event::Type::MouseUp) {
+            if (isPressed && event.getButton() == Button1) {
+                std::cout << "MouseUp detected, was pressed: " << isPressed << std::endl;
+                isPressed = false;
+                if (onMouseUp) onMouseUp();
+
+                if (isPointInside(event.getX(), event.getY())) {
+                    std::cout << "MouseUp inside button, triggering onClick" << std::endl;
+                    if (onClick) onClick();
+                    setState(isMouseOver ? ButtonState::Hover : ButtonState::Normal);
+                } else {
+                    setState(ButtonState::Normal);
+                }
+            }
+        }
+        else if (eventType == Event::Type::MouseMove) {
+            bool wasMouseOver = isMouseOver;
+            isMouseOver = isPointInside(event.getX(), event.getY());
+
+            if (isMouseOver != wasMouseOver) {
+                if (isMouseOver) {
+                    setState(isPressed ? ButtonState::Pressed : ButtonState::Hover);
+                    if (onMouseEnter) onMouseEnter();
+                } else {
+                    setState(ButtonState::Normal);
+                    if (onMouseLeave) onMouseLeave();
+                }
+            }
+        }
+        else if (eventType == Event::Type::MouseEnter) {
+            isMouseOver = true;
+            setState(isPressed ? ButtonState::Pressed : ButtonState::Hover);
+            if (onMouseEnter) onMouseEnter();
+        }
+        else if (eventType == Event::Type::MouseLeave) {
+            isMouseOver = false;
+            setState(ButtonState::Normal);
+            if (onMouseLeave) onMouseLeave();
+        }
+
+        // Передаем событие дочерним виджетам
+        Widget::handleEvent(event);
+    }
+
+    // Переопределение метода отрисовки
+    void paintToBuffer(Display* display) override {
+        ensureBuffer(display, getWindow());
+        RenderBuffer* buffer = getBuffer();
+        if (!buffer) return;
+
+        // Инициализация ресурсов, если необходимо
+        initResources(display);
+
+        // Определение цвета фона в зависимости от состояния
+        unsigned long bgColor;
+        switch (state) {
+            case ButtonState::Hover:
+                bgColor = hoverColor;
+            std::cout << "Painting button in HOVER state" << std::endl;
+            break;
+            case ButtonState::Pressed:
+                bgColor = pressedColor;
+            std::cout << "Painting button in PRESSED state" << std::endl;
+            break;
+            case ButtonState::Disabled:
+                bgColor = disabledColor;
+            std::cout << "Painting button in DISABLED state" << std::endl;
+            break;
+            default:
+                bgColor = normalColor;
+            std::cout << "Painting button in NORMAL state" << std::endl;
+        }
+
+        // Рисуем фон кнопки
+        buffer->fillRectangle(0, 0, getWidth(), getHeight(), bgColor);
+
+        // Рисуем рамку
+        buffer->drawRectangle(0, 0, getWidth() - 1, getHeight() - 1, 0x000000);
+
+        // Создаем XftDraw для рисования текста
+        if (xftDraw) {
+            XftDrawDestroy(xftDraw);
+        }
+
+        xftDraw = XftDrawCreate(
+            display,
+            buffer->getPixmap(),
+            DefaultVisual(display, DefaultScreen(display)),
+            DefaultColormap(display, DefaultScreen(display))
+        );
+
+        if (xftDraw && font) {
+            // Вычисляем размеры текста
+            XGlyphInfo extents;
+            XftTextExtentsUtf8(
+                display,
+                font,
+                reinterpret_cast<const FcChar8*>(label.c_str()),
+                label.length(),
+                &extents
+            );
+
+            // Центрируем текст
+            int textX = (getWidth() - extents.width) / 2;
+            int textY = (getHeight() + font->ascent - font->descent) / 2;
+
+            // Выбираем цвет текста в зависимости от состояния
+            XftColor* currentTextColor = (state == ButtonState::Disabled) ? &disabledTextColor : &textColor;
+
+            // Рисуем текст
+            XftDrawStringUtf8(
+                xftDraw,
+                currentTextColor,
+                font,
+                textX,
+                textY,
+                reinterpret_cast<const FcChar8*>(label.c_str()),
+                label.length()
+            );
+        }
+    }
+
+    // Метод для освобождения ресурсов при уничтожении
+    void cleanup(Display* display) {
+        cleanupResources(display);
+    }
 };

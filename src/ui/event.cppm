@@ -1,5 +1,6 @@
 module;
 #include <X11/Xlib.h>
+#include <iostream>
 
 export module ui.event;
 
@@ -43,16 +44,28 @@ public:
                 y = xEvent.xmotion.y;
                 break;
             case ButtonPress:
-                type = Type::MouseDown;
+                type = Event::Type::MouseDown;
                 x = xEvent.xbutton.x;
                 y = xEvent.xbutton.y;
-                button = xEvent.xbutton.button;
+                button = xEvent.xbutton.button;  // Сохраняем номер кнопки
+                std::cout << "Converting ButtonPress to MouseDown, button=" << button << std::endl;
                 break;
             case ButtonRelease:
-                type = Type::MouseUp;
+                type = Event::Type::MouseUp;
                 x = xEvent.xbutton.x;
                 y = xEvent.xbutton.y;
-                button = xEvent.xbutton.button;
+                button = xEvent.xbutton.button;  // Сохраняем номер кнопки
+                std::cout << "Converting ButtonRelease to MouseUp, button=" << button << std::endl;
+                break;
+            case EnterNotify:
+                type = Type::MouseEnter;
+                x = xEvent.xcrossing.x;
+                y = xEvent.xcrossing.y;
+                break;
+            case LeaveNotify:
+                type = Type::MouseLeave;
+                x = xEvent.xcrossing.x;
+                y = xEvent.xcrossing.y;
                 break;
             case KeyPress:
                 type = Type::KeyDown;

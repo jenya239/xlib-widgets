@@ -3,6 +3,12 @@ require 'fileutils'
 require 'digest'
 require 'json'
 
+# Добавляем флаги для FreeType и Xft
+freetype_flags = "`pkg-config --cflags freetype2`".strip
+xft_flags = "`pkg-config --cflags xft`".strip
+x11_flags = "`pkg-config --cflags x11`".strip
+compile_flags = "#{freetype_flags} #{xft_flags} #{x11_flags}"
+
 # Директория с исходными файлами
 src_dir = "src"
 output_dir = "build"  # Папка для выходных файлов
@@ -116,7 +122,7 @@ sorted.each do |mod|
   deps_flags = modules[mod][:imports].map { |dep| "-fmodule-file=#{dep}=#{compiled_modules[dep]}" if compiled_modules[dep] }.compact.join(' ')
 
   # Команда для предварительной компиляции модуля с зависимостями
-  build_commands << "clang++ -std=c++20 #{file} --precompile -fprebuilt-module-path=#{temp_dir} #{deps_flags} -o #{output_file}" # -lX11
+  build_commands << "clang++ -std=c++20 #{file} --precompile -fprebuilt-module-path=#{temp_dir} #{deps_flags} #{compile_flags} -o #{output_file}" # -lX11
 
   # Запоминаем путь к скомпилированному .pcm
   compiled_modules[mod] = output_file
@@ -147,7 +153,7 @@ if rebuild_main
   module_files_list  = module_map.values.join(' ')
 
   # Итоговая команда
-  build_commands << "clang++ -std=c++20 #{main_path} #{module_files_flags} #{module_files_list} -lX11 -o #{output_executable}"
+  build_commands << "clang++ -std=c++20 #{main_path} #{module_files_flags} #{module_files_list} -lX11 -lXft -lfreetype -o #{output_executable}"
 end
 
 # Обновляем кэш
