@@ -1,2 +1,4 @@
 build
 .idea
+cmake-build-debug/
+project_files.txt

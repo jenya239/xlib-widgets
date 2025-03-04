@@ -5,21 +5,25 @@ module;
 #include <functional>
 #include <unordered_map>
 #include <string>
+#include <iostream>
 
 import services.xdisplay_service;
 import ui.event;
+import services.logger_service;
 
 export module services.event_loop_service;
 
 export class EventLoopService {
 private:
     std::shared_ptr<XDisplayService> displayService;
+    std::shared_ptr<LoggerService> logger; 
     bool running = false;
     std::unordered_map<Window, std::function<void(const Event&)>> eventHandlers;
 
 public:
-    explicit EventLoopService(std::shared_ptr<XDisplayService> displayService)
-        : displayService(std::move(displayService)) {}
+    explicit EventLoopService(std::shared_ptr<XDisplayService> displayService, 
+                              std::shared_ptr<LoggerService> logger)
+        : displayService(std::move(displayService)), logger(logger) {}
 
     void registerEventHandler(Window window, std::function<void(const Event&)> handler) {
         eventHandlers[window] = std::move(handler);
@@ -50,16 +54,49 @@ public:
 
 private:
     Event convertXEventToEvent(const XEvent& xEvent) {
-        // Enhanced conversion from XEvent to our custom Event
         switch (xEvent.type) {
             case ButtonPress:
-                return Event("click", xEvent.xbutton.x, xEvent.xbutton.y);
+                std::cout << "[DEBUG] ButtonPress event detected" << std::endl;
+            if (xEvent.xbutton.button == Button1) {
+                std::cout << "[DEBUG] Left mouse button pressed" << std::endl;
+                return Event(EventType::MouseDown, xEvent.xbutton.x, xEvent.xbutton.y);
+            }
+            // Добавляем возврат для других кнопок мыши
+            return Event(EventType::Unknown, xEvent.xbutton.x, xEvent.xbutton.y);
+
+            case ButtonRelease:
+                std::cout << "[DEBUG] ButtonRelease event detected" << std::endl;
+            if (xEvent.xbutton.button == Button1) {
+                std::cout << "[DEBUG] Left mouse button released" << std::endl;
+                return Event(EventType::MouseUp, xEvent.xbutton.x, xEvent.xbutton.y);
+            }
+            // Добавляем возврат для других кнопок мыши
+            return Event(EventType::Unknown, xEvent.xbutton.x, xEvent.xbutton.y);
+
             case KeyPress:
-                return Event("keypress", xEvent.xkey.x, xEvent.xkey.y);
+                std::cout << "[DEBUG] KeyPress event detected" << std::endl;
+            return Event(EventType::KeyPressEvent, xEvent.xkey.x, xEvent.xkey.y);
+
             case Expose:
-                return Event("paint", xEvent.xexpose.x, xEvent.xexpose.y);
+                std::cout << "[DEBUG] Expose event detected" << std::endl;
+            return Event(EventType::PaintEvent, xEvent.xexpose.x, xEvent.xexpose.y);
+
+            case MotionNotify:
+//                std::cout << "[DEBUG] Mouse motion event detected" << std::endl;
+            return Event(EventType::MouseMove, xEvent.xmotion.x, xEvent.xmotion.y);
+
+            case EnterNotify:
+                std::cout << "[DEBUG] Mouse entered window" << std::endl;
+            return Event(EventType::MouseEnter, xEvent.xcrossing.x, xEvent.xcrossing.y);
+
+            case LeaveNotify:
+                std::cout << "[DEBUG] Mouse left window" << std::endl;
+            return Event(EventType::MouseLeave, xEvent.xcrossing.x, xEvent.xcrossing.y);
+
             default:
-                return Event("unknown");
+                std::cout << "[DEBUG] Unknown event detected" << std::endl;
+            return Event(EventType::Unknown);
         }
     }
+
 };
