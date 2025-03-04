@@ -64,7 +64,7 @@ public:
             // Clear the dirty flag
             clearDirty();
         } else {
-            std::cout << "DEBUG: Widget::render - widget is not dirty, skipping buffer update" << std::endl;
+//            std::cout << "DEBUG: Widget::render - widget is not dirty, skipping buffer update" << std::endl;
         }
 
         // Render all children (they'll check their own dirty flags)

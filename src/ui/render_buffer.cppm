@@ -114,9 +114,9 @@ public:
             return;
         }
 
-        std::cout << "DEBUG: RenderBuffer::copyTo - Copying from (" << srcX << "," << srcY
-                  << ") to (" << destX << "," << destY << ") with size "
-                  << width << "x" << height << std::endl;
+//        std::cout << "DEBUG: RenderBuffer::copyTo - Copying from (" << srcX << "," << srcY
+//                  << ") to (" << destX << "," << destY << ") with size "
+//                  << width << "x" << height << std::endl;
 
         // Проверка границ
         if (srcX < 0) srcX = 0;
@@ -125,17 +125,17 @@ public:
         if (srcY + height > this->height) height = this->height - srcY;
 
         if (width > 0 && height > 0) {
-            std::cout << "DEBUG: RenderBuffer::copyTo - After bounds check: from (" << srcX << "," << srcY
-                      << ") with size " << width << "x" << height << std::endl;
+//            std::cout << "DEBUG: RenderBuffer::copyTo - After bounds check: from (" << srcX << "," << srcY
+//                      << ") with size " << width << "x" << height << std::endl;
 
             // Создаем временный GC для операции копирования
             GC tempGC = XCreateGC(display, dest, 0, nullptr);
             if (tempGC) {
-                std::cout << "DEBUG: RenderBuffer::copyTo - Using temporary GC" << std::endl;
+//                std::cout << "DEBUG: RenderBuffer::copyTo - Using temporary GC" << std::endl;
                 XCopyArea(display, pixmap, dest, tempGC, srcX, srcY, width, height, destX, destY);
                 XFreeGC(display, tempGC);
             } else {
-                std::cout << "DEBUG: RenderBuffer::copyTo - Using buffer's GC" << std::endl;
+//                std::cout << "DEBUG: RenderBuffer::copyTo - Using buffer's GC" << std::endl;
                 XCopyArea(display, pixmap, dest, gc, srcX, srcY, width, height, destX, destY);
             }
             XFlush(display);

@@ -35,9 +35,9 @@ public:
 
     void handleEvent(const Event& event) override {
         // Проверяем, находится ли мышь внутри кнопки
-        bool isInside = isPointInside(event.x, event.y);
+        bool isInside = isPointInside(event.getX(), event.getY());
 
-        if (event.type == EventType::MouseMove) {
+        if (event.getType() == Event::Type::MouseMove) {
             // Обработка входа/выхода мыши
             if (isInside && !isMouseOver) {
                 // Мышь вошла в область кнопки
@@ -59,7 +59,7 @@ public:
             }
             // Убираем лишний лог для MouseMove
         }
-        else if (event.type == EventType::MouseDown && isInside) {
+        else if (event.getType() == Event::Type::MouseDown && isInside) {
             // Нажатие кнопки мыши внутри кнопки
             setState(ButtonState::Pressed);
             std::cout << "DEBUG: Mouse down on button - setting state to Pressed" << std::endl;
@@ -67,7 +67,7 @@ public:
                 onMouseDown();
             }
         }
-        else if (event.type == EventType::MouseUp) {
+        else if (event.getType() == Event::Type::MouseUp) {
             // Отпускание кнопки мыши
             if (state == ButtonState::Pressed) {
                 if (isInside) {
@@ -188,7 +188,7 @@ public:
 
     // Keep the old paint method for compatibility, but it will now use the buffer
     void paint(Display* display, ::Window window, GC gc) override {
-        std::cout << "DEBUG: Button::paint called" << std::endl;
+//        std::cout << "DEBUG: Button::paint called" << std::endl;
 
         // Вызываем render, чтобы обновить буфер, если нужно
         render(display, window);

@@ -1,49 +1,85 @@
 module;
-#include <string>
+#include <X11/Xlib.h>
 
 export module ui.event;
 
-export enum class EventType {
-    MouseDown,
-    MouseUp,
-    ButtonClick,  // Переименовано с Click
-    KeyPressEvent,  // Переименовано с KeyPress
-    PaintEvent,  // Переименовано с Paint
-    Unknown,
-    MouseMove,
-    MouseEnter,
-    MouseLeave
-};
+export class Event {
+public:
+    // Переименуем в Type, чтобы избежать конфликтов с EventType
+    enum class Type {
+        MouseMove,
+        MouseDown,
+        MouseUp,
+        MouseEnter,
+        MouseLeave,
+        KeyDown,
+        KeyUp,
+        KeyPressEvent,  // Добавлено для совместимости
+        PaintEvent,     // Добавлено для совместимости
+        WindowResize,
+        WindowClose,
+        Unknown
+    };
 
-export struct Event {
-    EventType type;
-    int x = 0;
-    int y = 0;
+private:
+    Type type;
+    int x;
+    int y;
+    unsigned int button;
+    unsigned int keycode;
+    XEvent nativeEvent;
 
-    Event(EventType type) : type(type) {}
-    Event(EventType type, int x, int y) : type(type), x(x), y(y) {}
+public:
+    Event(Type type = Type::Unknown, int x = 0, int y = 0,
+          unsigned int button = 0, unsigned int keycode = 0)
+        : type(type), x(x), y(y), button(button), keycode(keycode) {}
 
-    std::string typeToString() const {
-        switch (type) {
-            case EventType::MouseDown:
-                return "MouseDown";
-            case EventType::MouseUp:
-                return "MouseUp";
-            case EventType::KeyPressEvent:
-                return "KeyPressEvent";
-            case EventType::PaintEvent:
-                return "PaintEvent";
-            case EventType::MouseMove:
-                return "MouseMove";
-            case EventType::MouseEnter:
-                return "MouseEnter";
-            case EventType::MouseLeave:
-                return "MouseLeave";
-            case EventType::ButtonClick:
-                return "ButtonClick";
+    Event(const XEvent& xEvent) : nativeEvent(xEvent) {
+        // Преобразование XEvent в наш Event
+        switch (xEvent.type) {
+            case MotionNotify:
+                type = Type::MouseMove;
+                x = xEvent.xmotion.x;
+                y = xEvent.xmotion.y;
+                break;
+            case ButtonPress:
+                type = Type::MouseDown;
+                x = xEvent.xbutton.x;
+                y = xEvent.xbutton.y;
+                button = xEvent.xbutton.button;
+                break;
+            case ButtonRelease:
+                type = Type::MouseUp;
+                x = xEvent.xbutton.x;
+                y = xEvent.xbutton.y;
+                button = xEvent.xbutton.button;
+                break;
+            case KeyPress:
+                type = Type::KeyDown;
+                keycode = xEvent.xkey.keycode;
+                break;
+            case KeyRelease:
+                type = Type::KeyUp;
+                keycode = xEvent.xkey.keycode;
+                break;
+            case ConfigureNotify:
+                type = Type::WindowResize;
+                break;
+            case ClientMessage:
+                // Проверка на сообщение о закрытии окна
+                type = Type::WindowClose;
+                break;
             default:
-                return "Unknown";
+                type = Type::Unknown;
+                break;
         }
     }
 
+    // Геттеры для доступа к приватным полям
+    Type getType() const { return type; }
+    int getX() const { return x; }
+    int getY() const { return y; }
+    unsigned int getButton() const { return button; }
+    unsigned int getKeycode() const { return keycode; }
+    const XEvent& getNativeEvent() const { return nativeEvent; }
 };

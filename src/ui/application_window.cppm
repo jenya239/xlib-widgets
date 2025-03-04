@@ -86,7 +86,7 @@ public:
         Widget::handleEvent(event);
         
         // Handle paint events
-        if (event.type == EventType::PaintEvent) {
+        if (event.getType() == Event::Type::PaintEvent) {
             repaint();
         }
     }
