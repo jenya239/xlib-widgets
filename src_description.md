@@ -109,116 +109,146 @@ public:
 ### Файл: `src/main.cpp`
 
 ```cpp
-module;
-#include <X11/Xlib.h>
 #include <memory>
 #include <iostream>
-#include <functional>
-#include <cstring>
-#include <typeinfo>
+#include <string>
 #include <X11/Xft/Xft.h>
-#include <ft2build.h>
+#include <X11/keysym.h>
 
-// Для использования C++20 модулей в обычном .cpp файле нужно использовать import
+// Import necessary modules
+import core.ioc_container;
 import services.xdisplay_service;
 import services.event_loop_service;
 import services.logger_service;
 import services.render_service;
 import ui.application;
-import ui.application_window;
 import ui.button;
-import ui.event;
-import ui.widget;
 import ui.text_field;
+import ui.event;
+import ui.event_listener;
 
 int main() {
     try {
-        // Создаем и инициализируем приложение
+        std::cout << "Starting application..." << std::endl;
+
+        // Create application instance
         auto app = std::make_shared<Application>();
 
-        // Создаем главное окно
-        if (!app->createMainWindow("My Application", 800, 600)) {
+        // Create main window
+        if (!app->createMainWindow("Simple Test Application", 600, 400)) {
+            std::cerr << "Failed to create main window" << std::endl;
             return 1;
         }
 
-        auto mainWindow = app->getMainWindow();
         auto logger = app->getLogger();
-        auto renderService = app->getServices().getRenderService();
+        logger->info("Application initialized");
 
-        // Создаем кнопку
-        auto button = std::make_shared<Button>("Click Me!");
-        button->setPosition(100, 100);
-        button->setSize(200, 50);
+        auto mainWindow = app->getMainWindow();
+        auto displayService = app->getMainWindow()->getDisplay();
 
-        // Настраиваем обработчики событий для кнопки
+        // Create a button
+        auto button = std::make_shared<Button>("Test Button");
+        button->setPosition(50, 50);
+        button->setSize(150, 40);
+
+        // Set button event handlers
         button->setOnClick([&logger]() {
             logger->info("Button clicked!");
         });
 
-        button->setOnMouseEnter([&logger, button]() {
-            logger->info("Mouse entered button: " + button->getLabel());
-            logger->debug("Button state changed to HOVER");
+        button->setOnMouseEnter([&logger]() {
+            logger->info("Mouse entered button");
         });
 
-        button->setOnMouseLeave([&logger, button]() {
-            logger->info("Mouse left button: " + button->getLabel());
-            logger->debug("Button state changed to NORMAL");
+        button->setOnMouseLeave([&logger]() {
+            logger->info("Mouse left button");
         });
 
-        button->setOnMouseDown([&logger]() {
-            logger->debug("Button state changed to PRESSED");
-        });
+        // Create a text field with more visible properties
+        auto textField = std::make_shared<TextField>(50, 120, 250, 30, "Type here...");
+        textField->setVisible(true);  // Ensure visibility is set
 
-        button->setOnMouseUp([&logger]() {
-            logger->debug("Button state changed to HOVER (after press)");
-        });
+        // Make sure the text field needs repainting
+        textField->markDirty();
 
-        // Создаем текстовое поле
-        auto textField = std::make_shared<TextField>(100, 200, 300, 40, "Enter text here...");
+        // Load and set font for the text field
+        if (displayService) {
+            XftFont* font = XftFontOpenName(
+                displayService,
+                DefaultScreen(displayService),
+                "Sans-12"
+            );
 
-        // Получаем шрифт из сервиса рендеринга и устанавливаем его для текстового поля
-        XftFont* font = renderService->getFont();
-        if (font) {
-            textField->setFont(font);
+            if (font) {
+                textField->setFont(font);
+                logger->info("Font set for TextField");
+            } else {
+                logger->error("Failed to load font for TextField");
+            }
         }
 
-        // Настраиваем обработчик событий для текстового поля через общий обработчик событий
-        app->getEventLoop()->addEventHandler([&logger, textField](const Event& event) {
-            if (event.type == EventType::MOUSE_DOWN) {
-                // Проверяем, был ли клик на текстовом поле
-                int x = event.mouseEvent.x;
-                int y = event.mouseEvent.y;
-                int tfX = textField->getX();
-                int tfY = textField->getY();
-                int tfWidth = textField->getWidth();
-                int tfHeight = textField->getHeight();
-
-                if (x >= tfX && x <= tfX + tfWidth && y >= tfY && y <= tfY + tfHeight) {
-                    textField->setFocus(true);
-                    logger->info("TextField focused");
-                } else if (textField->isFocused()) {
-                    textField->setFocus(false);
-                    logger->info("TextField lost focus");
-                }
-            } else if (event.type == EventType::KEY_PRESS && textField->isFocused()) {
-                // Передаем событие клавиатуры в текстовое поле
-                textField->handleKeyPress(event.keyEvent);
-            }
-
-            return false; // Продолжаем обработку события
-        });
-
-        // Добавляем виджеты в окно
+        // Add widgets to main window
         mainWindow->addChild(button);
         mainWindow->addChild(textField);
 
-        // Настраиваем обработку событий
+        // Create a custom event listener for text field focus
+        class TextFieldEventListener : public EventListener {
+        private:
+            std::shared_ptr<TextField> textField;
+            std::shared_ptr<LoggerService> logger;
+
+        public:
+            TextFieldEventListener(std::shared_ptr<TextField> tf, std::shared_ptr<LoggerService> log)
+                : textField(tf), logger(log) {}
+
+            bool handleEvent(const Event& event) override {
+                // Get event type using the appropriate method
+                Event::Type eventType = event.getType();
+
+                // Handle mouse button press for focus management
+                if (eventType == Event::BUTTON_PRESS) {
+                    // Get mouse coordinates from the event
+                    int x = event.getX();
+                    int y = event.getY();
+
+                    // Check if click is within text field bounds
+                    if (x >= textField->getX() && x <= textField->getX() + textField->getWidth() &&
+                        y >= textField->getY() && y <= textField->getY() + textField->getHeight()) {
+                        textField->setFocus(true);
+                        logger->info("TextField focused");
+                        return true;
+                    } else if (textField->isFocused()) {
+                        textField->setFocus(false);
+                        logger->info("TextField lost focus");
+                    }
+                }
+                // Handle key press events when text field is focused
+                else if (eventType == Event::KEY_PRESS && textField->isFocused()) {
+                    // Get key information from the event
+                    char key = event.getKeyChar();
+                    textField->addCharacter(key);
+                    logger->info("Key pressed in TextField: " + std::string(1, key));
+                    return true;
+                }
+                return false;
+            }
+        };
+
+        // Create the event listener
+        auto textFieldListener = std::make_shared<TextFieldEventListener>(textField, logger);
+
+        // Register the event listener with the main window
+        mainWindow->addEventHandler(textFieldListener);
+
+        // Setup event handling
         app->setupEventHandling();
 
-        // Выполняем первоначальную отрисовку
+        // Initial render
         app->initialRender();
 
-        // Запускаем цикл обработки событий
+        logger->info("Starting event loop");
+
+        // Run the application
         app->run();
 
         return 0;

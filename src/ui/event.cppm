@@ -95,4 +95,35 @@ public:
     unsigned int getButton() const { return button; }
     unsigned int getKeycode() const { return keycode; }
     const XEvent& getNativeEvent() const { return nativeEvent; }
+
+    // Метод для получения строкового представления типа события
+    std::string getName() const {
+        switch (type) {
+            case Type::MouseMove:
+                return "MouseMove";
+            case Type::MouseDown:
+                return "MouseDown";
+            case Type::MouseUp:
+                return "MouseUp";
+            case Type::MouseEnter:
+                return "MouseEnter";
+            case Type::MouseLeave:
+                return "MouseLeave";
+            case Type::KeyDown:
+                return "KeyDown";
+            case Type::KeyUp:
+                return "KeyUp";
+            case Type::KeyPressEvent:
+                return "KeyPressEvent";
+            case Type::PaintEvent:
+                return "PaintEvent";
+            case Type::WindowResize:
+                return "WindowResize";
+            case Type::WindowClose:
+                return "WindowClose";
+            case Type::Unknown:
+                default:
+                    return "Unknown";
+        }
+    }
 };

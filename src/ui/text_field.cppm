@@ -10,6 +10,7 @@ export module ui.text_field;
 
 import ui.widget;
 import ui.render_buffer;
+import ui.event;
 
 export class TextField : public Widget {
 private:
@@ -87,6 +88,46 @@ public:
         focusedBorderColor = color;
     }
 
+    // Добавьте этот метод перед paintToBuffer
+    void handleEvent(const Event& event) override {
+        // Проверяем, находится ли точка внутри текстового поля
+        bool isInside = containsPoint(event.getX(), event.getY());
+
+        if (event.getType() == Event::Type::MouseDown && isInside) {
+            std::cerr << "TextField clicked, setting focus to true" << std::endl;
+            setFocus(true);
+            markDirty(); // Отмечаем как грязный при получении фокуса
+
+            // Здесь можно добавить логику для установки позиции курсора
+            // в зависимости от позиции клика
+        }
+        else if (event.getType() == Event::Type::MouseDown && !isInside) {
+            std::cerr << "Click outside TextField, removing focus" << std::endl;
+            setFocus(false);
+            markDirty(); // Отмечаем как грязный при потере фокуса
+        }
+
+        // Обрабатываем клавиатурные события, если в фокусе
+        // Удалите этот блок, так как он дублирует нижний блок
+         if (focused && event.getType() != Event::Type::Unknown) {
+             std::cerr << "TextField processing event " << event.getName() << static_cast<int>(event.getType()) <<
+               static_cast<int>(Event::Type::KeyDown) << std::endl;
+//             XKeyEvent keyCopy = event.getNativeEvent().xkey;
+//             handleKeyPress(keyCopy);
+         }
+
+        // Обрабатываем клавиатурные события, если в фокусе
+        if (focused && event.getType() == Event::Type::KeyDown) {
+            std::cerr << "TextField processing key press event" << std::endl;
+            XKeyEvent keyCopy = event.getNativeEvent().xkey;
+            handleKeyPress(keyCopy);
+            markDirty();
+        }
+
+        // Передаем событие базовому классу
+        Widget::handleEvent(event);
+    }
+
     bool handleKeyPress(XKeyEvent& event) {
         if (!focused) return false;
 
@@ -130,16 +171,15 @@ public:
 
         return false;
     }
+    // Replace the render() and draw() methods with paintToBuffer()
+    void paintToBuffer(Display* display) override {
+        // Get the buffer from the parent class
+        ensureBuffer(display, getWindow());
+        RenderBuffer* buffer = getBuffer();
+        if (!buffer) return;
 
-    // Widget implementation
-    void render(Display* display, Window window) override {
         int width = getWidth();
         int height = getHeight();
-
-        // Resize buffer if needed
-        if (!buffer || buffer->getWidth() != width || buffer->getHeight() != height) {
-            buffer = std::make_unique<RenderBuffer>(display, window, width, height);
-        }
 
         // Clear buffer with background color
         buffer->clear(backgroundColor);
@@ -147,6 +187,7 @@ public:
         // Draw border
         unsigned long currentBorderColor = focused ? focusedBorderColor : borderColor;
         buffer->drawRectangle(0, 0, width - 1, height - 1, currentBorderColor);
+        std::cerr << "text field paintToBuffer drawRectangle" << std::endl;
 
         // Initialize font if needed
         if (!font) {
@@ -186,13 +227,6 @@ public:
                 // Draw cursor at beginning when text is empty
                 buffer->drawLine(padding, padding, padding, height - padding, currentBorderColor);
             }
-        }
-    }
-
-    void draw(Display* display, Window window) {
-        render(display, window);
-        if (buffer) {
-            buffer->copyToWindow(window, getX(), getY());
         }
     }
 };

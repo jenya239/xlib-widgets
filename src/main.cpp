@@ -2,6 +2,7 @@
 #include <iostream>
 #include <string>
 #include <X11/Xft/Xft.h>
+#include <X11/keysym.h>
 
 // Import necessary modules
 import core.ioc_container;
@@ -12,6 +13,8 @@ import services.render_service;
 import ui.application;
 import ui.button;
 import ui.text_field;
+import ui.event;
+import ui.event_listener;
 
 int main() {
     try {
@@ -50,8 +53,12 @@ int main() {
             logger->info("Mouse left button");
         });
 
-        // Create a text field
+        // Create a text field with more visible properties
         auto textField = std::make_shared<TextField>(50, 120, 250, 30, "Type here...");
+        textField->setVisible(true);  // Ensure visibility is set
+
+        // Make sure the text field needs repainting
+        textField->markDirty();
 
         // Load and set font for the text field
         if (displayService) {
@@ -72,6 +79,52 @@ int main() {
         // Add widgets to main window
         mainWindow->addChild(button);
         mainWindow->addChild(textField);
+
+        // Create a custom event listener for text field focus
+        class TextFieldEventListener : public EventListener {
+        private:
+            std::shared_ptr<TextField> textField;
+            std::shared_ptr<LoggerService> logger;
+
+        public:
+            TextFieldEventListener(std::shared_ptr<TextField> tf, std::shared_ptr<LoggerService> log)
+                : textField(tf), logger(log) {}
+
+            void handleEvent(const Event& event) override {
+                // Get event type using the appropriate method
+                Event::Type eventType = event.getType();
+
+                // Handle mouse button press for focus management
+                if (eventType == Event::Type::MouseDown) {
+                    // Get mouse coordinates from the event
+                    int x = event.getX();
+                    int y = event.getY();
+
+                    // Check if click is within text field bounds
+                    if (x >= textField->getX() && x <= textField->getX() + textField->getWidth() &&
+                        y >= textField->getY() && y <= textField->getY() + textField->getHeight()) {
+                        textField->setFocus(true);
+                        logger->info("TextField focused");
+                    } else if (textField->isFocused()) {
+                        textField->setFocus(false);
+                        logger->info("TextField lost focus");
+                    }
+                }
+                // Handle key press events when text field is focused
+                else if (eventType == Event::Type::KeyDown && textField->isFocused()) {
+                    // Get key information from the event
+                    char key = event.getKeycode();
+//                    textField->handleKeyInput(key);
+                    logger->info("Key pressed in TextField: " + std::string(1, key));
+                }
+            }
+        };
+
+//        // Create the event listener
+//        auto textFieldListener = std::make_shared<TextFieldEventListener>(textField, logger);
+//
+//        // Register the event listener with the main window
+//        mainWindow->addEventListener(textFieldListener);
 
         // Setup event handling
         app->setupEventHandling();

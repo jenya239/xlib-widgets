@@ -59,7 +59,7 @@ public:
         // Выбираем события, которые хотим получать
         // В методе setupEventHandling или при создании окна
         XSelectInput(display, xWindow, ExposureMask | ButtonPressMask | ButtonReleaseMask |
-                              PointerMotionMask | EnterWindowMask | LeaveWindowMask);
+                              PointerMotionMask | EnterWindowMask | LeaveWindowMask | KeyPressMask | KeyReleaseMask);
 
         // Отображаем окно
         XMapWindow(display, xWindow);
