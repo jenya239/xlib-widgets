@@ -2,7 +2,7 @@
 
 ## Краткая статистика
 
-- Всего файлов: 13
+- Всего файлов: 14
 - Типы файлов: .cppm, .cpp
 
 ## Структура директорий
@@ -24,6 +24,7 @@ src/ui/
   └── event.cppm
   └── event_listener.cppm
   └── render_buffer.cppm
+  └── text_field.cppm
   └── widget.cppm
 ```
 
@@ -108,13 +109,15 @@ public:
 ### Файл: `src/main.cpp`
 
 ```cpp
-// main.cpp
+module;
 #include <X11/Xlib.h>
 #include <memory>
 #include <iostream>
 #include <functional>
 #include <cstring>
 #include <typeinfo>
+#include <X11/Xft/Xft.h>
+#include <ft2build.h>
 
 // Для использования C++20 модулей в обычном .cpp файле нужно использовать import
 import services.xdisplay_service;
@@ -126,6 +129,7 @@ import ui.application_window;
 import ui.button;
 import ui.event;
 import ui.widget;
+import ui.text_field;
 
 int main() {
     try {
@@ -139,6 +143,7 @@ int main() {
 
         auto mainWindow = app->getMainWindow();
         auto logger = app->getLogger();
+        auto renderService = app->getServices().getRenderService();
 
         // Создаем кнопку
         auto button = std::make_shared<Button>("Click Me!");
@@ -146,30 +151,66 @@ int main() {
         button->setSize(200, 50);
 
         // Настраиваем обработчики событий для кнопки
-        button->onClick = [&logger]() {
+        button->setOnClick([&logger]() {
             logger->info("Button clicked!");
-        };
+        });
 
-        button->onMouseEnter = [&logger, button]() {
+        button->setOnMouseEnter([&logger, button]() {
             logger->info("Mouse entered button: " + button->getLabel());
             logger->debug("Button state changed to HOVER");
-        };
+        });
 
-        button->onMouseLeave = [&logger, button]() {
+        button->setOnMouseLeave([&logger, button]() {
             logger->info("Mouse left button: " + button->getLabel());
             logger->debug("Button state changed to NORMAL");
-        };
+        });
 
-        button->onMouseDown = [&logger]() {
+        button->setOnMouseDown([&logger]() {
             logger->debug("Button state changed to PRESSED");
-        };
+        });
 
-        button->onMouseUp = [&logger]() {
+        button->setOnMouseUp([&logger]() {
             logger->debug("Button state changed to HOVER (after press)");
-        };
+        });
 
-        // Добавляем кнопку в окно
+        // Создаем текстовое поле
+        auto textField = std::make_shared<TextField>(100, 200, 300, 40, "Enter text here...");
+
+        // Получаем шрифт из сервиса рендеринга и устанавливаем его для текстового поля
+        XftFont* font = renderService->getFont();
+        if (font) {
+            textField->setFont(font);
+        }
+
+        // Настраиваем обработчик событий для текстового поля через общий обработчик событий
+        app->getEventLoop()->addEventHandler([&logger, textField](const Event& event) {
+            if (event.type == EventType::MOUSE_DOWN) {
+                // Проверяем, был ли клик на текстовом поле
+                int x = event.mouseEvent.x;
+                int y = event.mouseEvent.y;
+                int tfX = textField->getX();
+                int tfY = textField->getY();
+                int tfWidth = textField->getWidth();
+                int tfHeight = textField->getHeight();
+
+                if (x >= tfX && x <= tfX + tfWidth && y >= tfY && y <= tfY + tfHeight) {
+                    textField->setFocus(true);
+                    logger->info("TextField focused");
+                } else if (textField->isFocused()) {
+                    textField->setFocus(false);
+                    logger->info("TextField lost focus");
+                }
+            } else if (event.type == EventType::KEY_PRESS && textField->isFocused()) {
+                // Передаем событие клавиатуры в текстовое поле
+                textField->handleKeyPress(event.keyEvent);
+            }
+
+            return false; // Продолжаем обработку события
+        });
+
+        // Добавляем виджеты в окно
         mainWindow->addChild(button);
+        mainWindow->addChild(textField);
 
         // Настраиваем обработку событий
         app->setupEventHandling();
@@ -200,6 +241,7 @@ module;
 #include <memory>
 #include <chrono>
 #include <thread>
+#include <iostream>
 
 export module services.event_loop_service;
 
@@ -243,8 +285,15 @@ public:
                 XEvent xEvent;
                 XNextEvent(display, &xEvent);
 
+                // Отладочный вывод для событий мыши
+                if (xEvent.type == ButtonPress) {
+                    std::cout << "X11 ButtonPress event received: button=" << xEvent.xbutton.button << std::endl;
+                } else if (xEvent.type == ButtonRelease) {
+                    std::cout << "X11 ButtonRelease event received: button=" << xEvent.xbutton.button << std::endl;
+                }
+
                 // Convert X11 event to our custom Event
-                Event event = convertXEvent(xEvent);
+                Event event(xEvent);
 
                 // Find and call the appropriate handler
                 auto it = eventHandlers.find(xEvent.xany.window);
@@ -269,45 +318,6 @@ public:
     // Stop the event loop
     void stop() {
         running = false;
-    }
-
-private:
-    // Convert X11 event to our custom Event
-    Event convertXEvent(const XEvent& xEvent) {
-        Event::Type type;
-        int x = 0, y = 0;
-
-        switch (xEvent.type) {
-            case Expose:
-                type = Event::Type::PaintEvent;
-                break;
-            case ButtonPress:
-                type = Event::Type::MouseDown;
-                x = xEvent.xbutton.x;
-                y = xEvent.xbutton.y;
-                break;
-            case ButtonRelease:
-                type = Event::Type::MouseUp;
-                x = xEvent.xbutton.x;
-                y = xEvent.xbutton.y;
-                break;
-            case MotionNotify:
-                type = Event::Type::MouseMove;
-                x = xEvent.xmotion.x;
-                y = xEvent.xmotion.y;
-                break;
-            case KeyPress:
-                type = Event::Type::KeyDown;
-                break;
-            case KeyRelease:
-                type = Event::Type::KeyUp;
-                break;
-            default:
-                type = Event::Type::Unknown;
-                break;
-        }
-
-        return Event(type, x, y);
     }
 };
 ```
@@ -713,9 +723,9 @@ public:
         XStoreName(display, xWindow, title.c_str());
 
         // Выбираем события, которые хотим получать
-        XSelectInput(display, xWindow,
-            ExposureMask | ButtonPressMask | ButtonReleaseMask |
-            KeyPressMask | StructureNotifyMask | PointerMotionMask);
+        // В методе setupEventHandling или при создании окна
+        XSelectInput(display, xWindow, ExposureMask | ButtonPressMask | ButtonReleaseMask |
+                              PointerMotionMask | EnterWindowMask | LeaveWindowMask);
 
         // Отображаем окно
         XMapWindow(display, xWindow);
@@ -773,12 +783,13 @@ public:
 module;
 #include <string>
 #include <X11/Xlib.h>
+#include <X11/Xft/Xft.h>
 #include <functional>
 #include <iostream>
+#include <algorithm>
 
 import ui.widget;
 import ui.event;
-import ui.event_listener;
 import ui.render_buffer;
 
 export module ui.button;
@@ -787,211 +798,298 @@ export module ui.button;
 export enum class ButtonState {
     Normal,
     Hover,
-    Pressed
+    Pressed,
+    Disabled
 };
 
 export class Button : public Widget {
 private:
     std::string label;
-    ButtonState state = ButtonState::Normal;  // Current button state
-    bool isMouseOver = false;  // Флаг для отслеживания нахождения мыши над кнопкой
+    ButtonState state = ButtonState::Normal;
+    bool isMouseOver = false;
+    bool isPressed = false;
+    XftFont* font = nullptr;
+    XftDraw* xftDraw = nullptr;
+
+    // Цвета для разных состояний кнопки
+    unsigned long normalColor = 0xCCCCCC;
+    unsigned long hoverColor = 0xAAAAAA;
+    unsigned long pressedColor = 0x777777;
+    unsigned long disabledColor = 0xEEEEEE;
+
+    // Xft цвета для текста
+    XftColor textColor;
+    XftColor disabledTextColor;
+
+    // Callbacks для различных событий
+    std::function<void()> onClick;
+    std::function<void()> onMouseEnter;
+    std::function<void()> onMouseLeave;
+    std::function<void()> onMouseDown;
+    std::function<void()> onMouseUp;
 
     // Проверяет, находится ли точка внутри кнопки
     bool isPointInside(int x, int y) const {
-        return x >= getX() && x < getX() + getWidth() &&
-               y >= getY() && y < getY() + getHeight();
+        int absX, absY;
+        getAbsolutePosition(absX, absY);
+        return x >= absX && x < absX + static_cast<int>(getWidth()) &&
+               y >= absY && y < absY + static_cast<int>(getHeight());
     }
 
-public:
-    explicit Button(std::string label) : label(std::move(label)) {}
-
-    void handleEvent(const Event& event) override {
-        // Проверяем, находится ли мышь внутри кнопки
-        bool isInside = isPointInside(event.getX(), event.getY());
-
-        if (event.getType() == Event::Type::MouseMove) {
-            // Обработка входа/выхода мыши
-            if (isInside && !isMouseOver) {
-                // Мышь вошла в область кнопки
-                isMouseOver = true;
-                setState(ButtonState::Hover);
-                std::cout << "DEBUG: Mouse entered button - setting state to Hover" << std::endl;
-                if (onMouseEnter) {
-                    onMouseEnter();
-                }
-            }
-            else if (!isInside && isMouseOver) {
-                // Мышь вышла из области кнопки
-                isMouseOver = false;
-                setState(ButtonState::Normal);
-                std::cout << "DEBUG: Mouse left button - setting state to Normal" << std::endl;
-                if (onMouseLeave) {
-                    onMouseLeave();
-                }
-            }
-            // Убираем лишний лог для MouseMove
-        }
-        else if (event.getType() == Event::Type::MouseDown && isInside) {
-            // Нажатие кнопки мыши внутри кнопки
-            setState(ButtonState::Pressed);
-            std::cout << "DEBUG: Mouse down on button - setting state to Pressed" << std::endl;
-            if (onMouseDown) {
-                onMouseDown();
-            }
-        }
-        else if (event.getType() == Event::Type::MouseUp) {
-            // Отпускание кнопки мыши
-            if (state == ButtonState::Pressed) {
-                if (isInside) {
-                    // Если мышь внутри кнопки, вызываем onClick и меняем состояние на Hover
-                    setState(ButtonState::Hover);
-                    std::cout << "DEBUG: Mouse up inside button - setting state to Hover" << std::endl;
-                    if (onClick) {
-                        onClick();
-                    }
-                    if (onMouseUp) {
-                        onMouseUp();
-                    }
-                } else {
-                    // Если мышь вне кнопки, просто меняем состояние на Normal
-                    setState(ButtonState::Normal);
-                    std::cout << "DEBUG: Mouse up outside button - setting state to Normal" << std::endl;
-                    if (onMouseUp) {
-                        onMouseUp();
-                    }
-                }
-            }
-        }
-
-        // Передаем событие дальше базовому классу для обработки дочерними виджетами
-        Widget::handleEvent(event);
-    }
-
-    // Set button state and mark as dirty if state changed
-    void setState(ButtonState newState) {
-        if (state != newState) {
-            ButtonState oldState = state;
-            state = newState;
-            std::cout << "DEBUG: Button state changed from " << static_cast<int>(oldState)
-                      << " to " << static_cast<int>(newState) << " - marking as dirty" << std::endl;
-            markDirty();  // Вызываем метод из базового класса Widget
-
-            // Явно запрашиваем перерисовку
-            std::cout << "DEBUG: needsRepaint() returns: " << (needsRepaint() ? "true" : "false") << std::endl;
-        }
-    }
-
-    // Override paintToBuffer to change appearance based on state
-    void paintToBuffer(Display* display) override {
-        std::cout << "DEBUG: Button::paintToBuffer called with state: " << static_cast<int>(state) << std::endl;
-
-        RenderBuffer* buffer = getBuffer();
-        if (!buffer) {
-            std::cout << "ERROR: Buffer is null in paintToBuffer! Creating new buffer." << std::endl;
-            ensureBuffer(display, getWindow());
-            buffer = getBuffer();
-            if (!buffer) {
-                std::cout << "ERROR: Failed to create buffer!" << std::endl;
+    // Инициализация шрифта и цветов
+    void initResources(Display* display) {
+        if (!font) {
+            // Загружаем шрифт (можно настроить размер и имя шрифта)
+            font = XftFontOpenName(display, DefaultScreen(display), "Sans-12");
+            if (!font) {
+                std::cerr << "Failed to load font" << std::endl;
                 return;
             }
         }
 
-        GC gc = buffer->getGC();
-        Pixmap pixmap = buffer->getPixmap();
+        // Инициализация цветов
+        XftColorAllocName(
+            display,
+            DefaultVisual(display, DefaultScreen(display)),
+            DefaultColormap(display, DefaultScreen(display)),
+            "#000000",
+            &textColor
+        );
 
-        std::cout << "DEBUG: Buffer GC: " << gc << ", Pixmap: " << pixmap << std::endl;
+        XftColorAllocName(
+            display,
+            DefaultVisual(display, DefaultScreen(display)),
+            DefaultColormap(display, DefaultScreen(display)),
+            "#777777",
+            &disabledTextColor
+        );
+    }
 
-        // Остальной код без изменений...
-        unsigned long bgColor;
-        switch (state) {
-            case ButtonState::Pressed:
-                bgColor = 0x777777;  // Темно-серый при нажатии
-                std::cout << "DEBUG: Using PRESSED color: 0x777777" << std::endl;
-                break;
-            case ButtonState::Hover:
-                bgColor = 0xAAAAAA;  // Светло-серый при наведении
-                std::cout << "DEBUG: Using HOVER color: 0xAAAAAA" << std::endl;
-                break;
-            case ButtonState::Normal:
-            default:
-                bgColor = 0xCCCCCC;  // Обычный серый
-                std::cout << "DEBUG: Using NORMAL color: 0xCCCCCC" << std::endl;
-                break;
-        }
-        unsigned long textColor = 0x000000;  // Черный текст
-
-        // Преобразуем цвета в формат X11
-        XColor xcolor;
-        Colormap colormap = DefaultColormap(display, DefaultScreen(display));
-
-        // Устанавливаем цвет фона
-        xcolor.red = ((bgColor >> 16) & 0xFF) * 256;
-        xcolor.green = ((bgColor >> 8) & 0xFF) * 256;
-        xcolor.blue = (bgColor & 0xFF) * 256;
-        xcolor.flags = DoRed | DoGreen | DoBlue;
-
-        if (XAllocColor(display, colormap, &xcolor)) {
-            std::cout << "DEBUG: Allocated background color: " << xcolor.pixel << std::endl;
-            XSetForeground(display, gc, xcolor.pixel);
-        } else {
-            std::cout << "ERROR: Failed to allocate background color!" << std::endl;
-            XSetForeground(display, gc, WhitePixel(display, DefaultScreen(display)));
+    // Освобождение ресурсов
+    void cleanupResources(Display* display) {
+        if (font) {
+            XftFontClose(display, font);
+            font = nullptr;
         }
 
-        // Draw button background
-        XFillRectangle(display, pixmap, gc, 0, 0, getWidth(), getHeight());
+        if (xftDraw) {
+            XftDrawDestroy(xftDraw);
+            xftDraw = nullptr;
+        }
 
-        // Устанавливаем цвет границы (черный)
-        XSetForeground(display, gc, BlackPixel(display, DefaultScreen(display)));
-        XDrawRectangle(display, pixmap, gc, 0, 0, getWidth() - 1, getHeight() - 1);
+        XftColorFree(
+            display,
+            DefaultVisual(display, DefaultScreen(display)),
+            DefaultColormap(display, DefaultScreen(display)),
+            &textColor
+        );
 
-        // Text position adjustment for pressed state (slight shift down/right)
-        int textX = (state == ButtonState::Pressed) ? 11 : 10;
-        int textY = (state == ButtonState::Pressed) ? getHeight() / 2 + 6 : getHeight() / 2 + 5;
-
-        // Draw button text
-        XSetForeground(display, gc, BlackPixel(display, DefaultScreen(display)));
-        XDrawString(display, pixmap, gc,
-                    textX, textY,
-                    label.c_str(), label.length());
-
-        std::cout << "DEBUG: Button painted with state: " << static_cast<int>(state) << std::endl;
+        XftColorFree(
+            display,
+            DefaultVisual(display, DefaultScreen(display)),
+            DefaultColormap(display, DefaultScreen(display)),
+            &disabledTextColor
+        );
     }
 
-    // Keep the old paint method for compatibility, but it will now use the buffer
-    void paint(Display* display, ::Window window, GC gc) override {
-//        std::cout << "DEBUG: Button::paint called" << std::endl;
+public:
+    Button(const std::string& buttonLabel = "", const std::string& id = "")
+        : Widget(id), label(buttonLabel) {}
 
-        // Вызываем render, чтобы обновить буфер, если нужно
-        render(display, window);
-
-        // Теперь вызываем базовый метод, который скопирует буфер на экран
-        Widget::paint(display, window, gc);
+    ~Button() {
+        // Ресурсы будут освобождены в cleanupResources
     }
 
-    // Переопределяем метод needsRepaint для отладки
-    bool needsRepaint() const override {
-        bool result = Widget::needsRepaint();
-        return result;
+    // Установка текста кнопки
+    void setLabel(const std::string& newLabel) {
+        if (label != newLabel) {
+            label = newLabel;
+            markDirty();
+        }
     }
 
-    // Переопределяем метод clearDirty для отладки
-    void clearDirty() override {
-        std::cout << "DEBUG: Button::clearDirty() called" << std::endl;
-        Widget::clearDirty();
-    }
-
-    // Геттер для получения текста кнопки
-    std::string getLabel() const {
+    const std::string& getLabel() const {
         return label;
     }
 
-    // Колбэки для различных событий
-    std::function<void()> onClick;
-    std::function<void()> onMouseEnter;
-    std::function<void()> onMouseLeave;
-    std::function<void()> onMouseDown;  // Добавлен новый колбэк
-    std::function<void()> onMouseUp;    // Добавлен новый колбэк
+    void setState(ButtonState newState) {
+        if (state != newState) {
+            std::cout << "Button state changed: " << static_cast<int>(state) << " -> " << static_cast<int>(newState) << std::endl;
+            state = newState;
+            markDirty();
+        }
+    }
+
+    ButtonState getState() const {
+        return state;
+    }
+
+    // Методы для установки обработчиков событий
+    void setOnClick(std::function<void()> handler) {
+        onClick = handler;
+    }
+
+    void setOnMouseEnter(std::function<void()> handler) {
+        onMouseEnter = handler;
+    }
+
+    void setOnMouseLeave(std::function<void()> handler) {
+        onMouseLeave = handler;
+    }
+
+    void setOnMouseDown(std::function<void()> handler) {
+        onMouseDown = handler;
+    }
+
+    void setOnMouseUp(std::function<void()> handler) {
+        onMouseUp = handler;
+    }
+
+    // Переопределение метода обработки событий
+    void handleEvent(const Event& event) override {
+        if (!isEnabled) return;
+
+        // Отладочный вывод
+//        std::cout << "Button::handleEvent called, event type: " << event.getNativeEvent().type << std::endl;
+
+        // Получаем XEvent из Event
+        Event::Type eventType = event.getType();
+
+        // Обработка событий мыши
+        if (eventType == Event::Type::MouseDown) {
+            if (isPointInside(event.getX(), event.getY()) && event.getButton() == Button1) {
+                std::cout << "MouseDown detected inside button" << std::endl;
+                isPressed = true;
+                setState(ButtonState::Pressed);
+                if (onMouseDown) onMouseDown();
+            }
+        }
+        else if (eventType == Event::Type::MouseUp) {
+            if (isPressed && event.getButton() == Button1) {
+                std::cout << "MouseUp detected, was pressed: " << isPressed << std::endl;
+                isPressed = false;
+                if (onMouseUp) onMouseUp();
+
+                if (isPointInside(event.getX(), event.getY())) {
+                    std::cout << "MouseUp inside button, triggering onClick" << std::endl;
+                    if (onClick) onClick();
+                    setState(isMouseOver ? ButtonState::Hover : ButtonState::Normal);
+                } else {
+                    setState(ButtonState::Normal);
+                }
+            }
+        }
+        else if (eventType == Event::Type::MouseMove) {
+            bool wasMouseOver = isMouseOver;
+            isMouseOver = isPointInside(event.getX(), event.getY());
+
+            if (isMouseOver != wasMouseOver) {
+                if (isMouseOver) {
+                    setState(isPressed ? ButtonState::Pressed : ButtonState::Hover);
+                    if (onMouseEnter) onMouseEnter();
+                } else {
+                    setState(ButtonState::Normal);
+                    if (onMouseLeave) onMouseLeave();
+                }
+            }
+        }
+        else if (eventType == Event::Type::MouseEnter) {
+            isMouseOver = true;
+            setState(isPressed ? ButtonState::Pressed : ButtonState::Hover);
+            if (onMouseEnter) onMouseEnter();
+        }
+        else if (eventType == Event::Type::MouseLeave) {
+            isMouseOver = false;
+            setState(ButtonState::Normal);
+            if (onMouseLeave) onMouseLeave();
+        }
+
+        // Передаем событие дочерним виджетам
+        Widget::handleEvent(event);
+    }
+
+    // Переопределение метода отрисовки
+    void paintToBuffer(Display* display) override {
+        ensureBuffer(display, getWindow());
+        RenderBuffer* buffer = getBuffer();
+        if (!buffer) return;
+
+        // Инициализация ресурсов, если необходимо
+        initResources(display);
+
+        // Определение цвета фона в зависимости от состояния
+        unsigned long bgColor;
+        switch (state) {
+            case ButtonState::Hover:
+                bgColor = hoverColor;
+            std::cout << "Painting button in HOVER state" << std::endl;
+            break;
+            case ButtonState::Pressed:
+                bgColor = pressedColor;
+            std::cout << "Painting button in PRESSED state" << std::endl;
+            break;
+            case ButtonState::Disabled:
+                bgColor = disabledColor;
+            std::cout << "Painting button in DISABLED state" << std::endl;
+            break;
+            default:
+                bgColor = normalColor;
+            std::cout << "Painting button in NORMAL state" << std::endl;
+        }
+
+        // Рисуем фон кнопки
+        buffer->fillRectangle(0, 0, getWidth(), getHeight(), bgColor);
+
+        // Рисуем рамку
+        buffer->drawRectangle(0, 0, getWidth() - 1, getHeight() - 1, 0x000000);
+
+        // Создаем XftDraw для рисования текста
+        if (xftDraw) {
+            XftDrawDestroy(xftDraw);
+        }
+
+        xftDraw = XftDrawCreate(
+            display,
+            buffer->getPixmap(),
+            DefaultVisual(display, DefaultScreen(display)),
+            DefaultColormap(display, DefaultScreen(display))
+        );
+
+        if (xftDraw && font) {
+            // Вычисляем размеры текста
+            XGlyphInfo extents;
+            XftTextExtentsUtf8(
+                display,
+                font,
+                reinterpret_cast<const FcChar8*>(label.c_str()),
+                label.length(),
+                &extents
+            );
+
+            // Центрируем текст
+            int textX = (getWidth() - extents.width) / 2;
+            int textY = (getHeight() + font->ascent - font->descent) / 2;
+
+            // Выбираем цвет текста в зависимости от состояния
+            XftColor* currentTextColor = (state == ButtonState::Disabled) ? &disabledTextColor : &textColor;
+
+            // Рисуем текст
+            XftDrawStringUtf8(
+                xftDraw,
+                currentTextColor,
+                font,
+                textX,
+                textY,
+                reinterpret_cast<const FcChar8*>(label.c_str()),
+                label.length()
+            );
+        }
+    }
+
+    // Метод для освобождения ресурсов при уничтожении
+    void cleanup(Display* display) {
+        cleanupResources(display);
+    }
 };
 ```
 
@@ -1002,6 +1100,7 @@ public:
 ```cpp
 module;
 #include <X11/Xlib.h>
+#include <iostream>
 
 export module ui.event;
 
@@ -1045,16 +1144,28 @@ public:
                 y = xEvent.xmotion.y;
                 break;
             case ButtonPress:
-                type = Type::MouseDown;
+                type = Event::Type::MouseDown;
                 x = xEvent.xbutton.x;
                 y = xEvent.xbutton.y;
-                button = xEvent.xbutton.button;
+                button = xEvent.xbutton.button;  // Сохраняем номер кнопки
+                std::cout << "Converting ButtonPress to MouseDown, button=" << button << std::endl;
                 break;
             case ButtonRelease:
-                type = Type::MouseUp;
+                type = Event::Type::MouseUp;
                 x = xEvent.xbutton.x;
                 y = xEvent.xbutton.y;
-                button = xEvent.xbutton.button;
+                button = xEvent.xbutton.button;  // Сохраняем номер кнопки
+                std::cout << "Converting ButtonRelease to MouseUp, button=" << button << std::endl;
+                break;
+            case EnterNotify:
+                type = Type::MouseEnter;
+                x = xEvent.xcrossing.x;
+                y = xEvent.xcrossing.y;
+                break;
+            case LeaveNotify:
+                type = Type::MouseLeave;
+                x = xEvent.xcrossing.x;
+                y = xEvent.xcrossing.y;
                 break;
             case KeyPress:
                 type = Type::KeyDown;
@@ -1110,12 +1221,13 @@ public:
 ### Файл: `src/ui/render_buffer.cppm`
 
 ```cpp
-// src/ui/render_buffer.cppm
 module;
 #include <X11/Xlib.h>
 #include <memory>
 #include <stdexcept>
 #include <iostream>
+#include <string>
+#include <X11/Xft/Xft.h>
 
 export module ui.render_buffer;
 
@@ -1127,6 +1239,7 @@ private:
     unsigned int width;
     unsigned int height;
     bool valid = true;  // Флаг для проверки валидности буфера
+    XftDraw* xftDraw = nullptr;
 
 public:
     RenderBuffer(Display* display, ::Window window, unsigned int width, unsigned int height)
@@ -1156,6 +1269,17 @@ public:
             throw std::runtime_error("Failed to create graphics context");
         }
 
+        // Create XftDraw for text rendering
+        Visual* visual = DefaultVisual(display, DefaultScreen(display));
+        Colormap colormap = DefaultColormap(display, DefaultScreen(display));
+        xftDraw = XftDrawCreate(display, pixmap, visual, colormap);
+
+        if (!xftDraw) {
+            XFreeGC(display, gc);
+            XFreePixmap(display, pixmap);
+            throw std::runtime_error("Failed to create Xft draw context");
+        }
+
         // Clear the pixmap initially
         XSetForeground(display, gc, WhitePixel(display, DefaultScreen(display)));
         XFillRectangle(display, pixmap, gc, 0, 0, width, height);
@@ -1163,6 +1287,9 @@ public:
 
     ~RenderBuffer() {
         if (valid) {
+            if (xftDraw) {
+                XftDrawDestroy(xftDraw);
+            }
             XFreeGC(display, gc);
             XFreePixmap(display, pixmap);
         }
@@ -1175,9 +1302,11 @@ public:
     // Moving is allowed
     RenderBuffer(RenderBuffer&& other) noexcept
         : display(other.display), pixmap(other.pixmap), gc(other.gc),
-          width(other.width), height(other.height), valid(other.valid) {
+          width(other.width), height(other.height), valid(other.valid),
+          xftDraw(other.xftDraw) {
         other.pixmap = 0;
         other.gc = nullptr;
+        other.xftDraw = nullptr;
         other.valid = false;
     }
 
@@ -1185,6 +1314,9 @@ public:
         if (this != &other) {
             // Clean up current resources
             if (valid) {
+                if (xftDraw) {
+                    XftDrawDestroy(xftDraw);
+                }
                 XFreeGC(display, gc);
                 XFreePixmap(display, pixmap);
             }
@@ -1196,10 +1328,12 @@ public:
             width = other.width;
             height = other.height;
             valid = other.valid;
+            xftDraw = other.xftDraw;
 
             // Invalidate other
             other.pixmap = 0;
             other.gc = nullptr;
+            other.xftDraw = nullptr;
             other.valid = false;
         }
         return *this;
@@ -1217,6 +1351,83 @@ public:
 
         XSetForeground(display, gc, color);
         XFillRectangle(display, pixmap, gc, 0, 0, width, height);
+    }
+
+    // Добавленные методы для рисования
+
+    // Рисование линии
+    void drawLine(int x1, int y1, int x2, int y2, unsigned long color) {
+        if (!valid) return;
+
+        XSetForeground(display, gc, color);
+        XDrawLine(display, pixmap, gc, x1, y1, x2, y2);
+    }
+
+    // Рисование прямоугольника (контур)
+    void drawRectangle(int x, int y, unsigned int width, unsigned int height, unsigned long color) {
+        if (!valid) return;
+
+        XSetForeground(display, gc, color);
+        XDrawRectangle(display, pixmap, gc, x, y, width, height);
+    }
+
+    // Рисование закрашенного прямоугольника
+    void fillRectangle(int x, int y, unsigned int width, unsigned int height, unsigned long color) {
+        if (!valid) return;
+
+        XSetForeground(display, gc, color);
+        XFillRectangle(display, pixmap, gc, x, y, width, height);
+    }
+
+    // Рисование текста с использованием Xft
+    void drawText(int x, int y, const std::string& text, XftFont* font, XftColor* color) {
+        if (!valid || !xftDraw || !font || !color) return;
+
+        XftDrawString8(xftDraw, color, font, x, y,
+                      (const FcChar8*)text.c_str(), text.length());
+    }
+
+    // Создание цвета Xft из RGB
+    XftColor* createXftColor(unsigned char r, unsigned char g, unsigned char b, unsigned char a = 255) {
+        XftColor* color = new XftColor();
+        XRenderColor renderColor;
+        renderColor.red = r * 257;    // Convert 0-255 to 0-65535
+        renderColor.green = g * 257;
+        renderColor.blue = b * 257;
+        renderColor.alpha = a * 257;
+
+        Colormap colormap = DefaultColormap(display, DefaultScreen(display));
+        XftColorAllocValue(display, DefaultVisual(display, DefaultScreen(display)),
+                          colormap, &renderColor, color);
+
+        return color;
+    }
+
+    // Освобождение цвета Xft
+    void freeXftColor(XftColor* color) {
+        if (color) {
+            Colormap colormap = DefaultColormap(display, DefaultScreen(display));
+            XftColorFree(display, DefaultVisual(display, DefaultScreen(display)),
+                        colormap, color);
+            delete color;
+        }
+    }
+
+    // Получение размеров текста
+    void getTextExtents(XftFont* font, const std::string& text,
+                        int& width, int& height, int& ascent, int& descent) {
+        if (!font) {
+            width = height = ascent = descent = 0;
+            return;
+        }
+
+        XGlyphInfo extents;
+        XftTextExtents8(display, font, (const FcChar8*)text.c_str(), text.length(), &extents);
+
+        width = extents.width;
+        height = extents.height;
+        ascent = font->ascent;
+        descent = font->descent;
     }
 
     void copyTo(Drawable dest, int srcX, int srcY, int destX, int destY,
@@ -1307,6 +1518,211 @@ public:
 
 ---
 
+### Файл: `src/ui/text_field.cppm`
+
+```cpp
+module;
+#include <X11/Xlib.h>
+#include <X11/keysym.h>
+#include <X11/Xft/Xft.h>
+#include <string>
+#include <memory>
+#include <iostream>
+
+export module ui.text_field;
+
+import ui.widget;
+import ui.render_buffer;
+
+export class TextField : public Widget {
+private:
+    std::string text;
+    std::string placeholder;
+    std::unique_ptr<RenderBuffer> buffer;
+    XftFont* font = nullptr;
+    XftColor* textColor = nullptr;
+    XftColor* placeholderColor = nullptr;
+
+    unsigned long backgroundColor = 0xFFFFFF;  // White
+    unsigned long borderColor = 0x000000;      // Black
+    unsigned long focusedBorderColor = 0x0000FF; // Blue
+
+    int cursorPosition = 0;
+    bool focused = false;
+    int padding = 5;  // Padding inside the text field
+
+public:
+    TextField(int x, int y, int width, int height, const std::string& placeholder = "")
+        : Widget(placeholder) {  // Use placeholder as the widget ID or use an empty string
+        // Set position and size manually since they're not in the constructor
+        setX(x);
+        setY(y);
+        setWidth(width);
+        setHeight(height);
+        this->placeholder = placeholder;
+    }
+
+    ~TextField() {
+        if (buffer) {
+            if (textColor) {
+                buffer->freeXftColor(textColor);
+                textColor = nullptr;
+            }
+            if (placeholderColor) {
+                buffer->freeXftColor(placeholderColor);
+                placeholderColor = nullptr;
+            }
+        }
+
+        // Font should be loaded and freed by the application
+    }
+
+    void setText(const std::string& newText) {
+        text = newText;
+        cursorPosition = text.length();
+    }
+
+    std::string getText() const {
+        return text;
+    }
+
+    void setFont(XftFont* newFont) {
+        font = newFont;
+    }
+
+    void setFocus(bool focus) {
+        focused = focus;
+    }
+
+    bool isFocused() const {
+        return focused;
+    }
+
+    void setBackgroundColor(unsigned long color) {
+        backgroundColor = color;
+    }
+
+    void setBorderColor(unsigned long color) {
+        borderColor = color;
+    }
+
+    void setFocusedBorderColor(unsigned long color) {
+        focusedBorderColor = color;
+    }
+
+    bool handleKeyPress(XKeyEvent& event) {
+        if (!focused) return false;
+
+        char buffer[32];
+        KeySym keysym;
+        int count = XLookupString(&event, buffer, sizeof(buffer), &keysym, nullptr);
+
+        if (keysym == XK_BackSpace) {
+            if (cursorPosition > 0) {
+                text.erase(cursorPosition - 1, 1);
+                cursorPosition--;
+                return true;
+            }
+        } else if (keysym == XK_Delete) {
+            if (cursorPosition < text.length()) {
+                text.erase(cursorPosition, 1);
+                return true;
+            }
+        } else if (keysym == XK_Left) {
+            if (cursorPosition > 0) {
+                cursorPosition--;
+                return true;
+            }
+        } else if (keysym == XK_Right) {
+            if (cursorPosition < text.length()) {
+                cursorPosition++;
+                return true;
+            }
+        } else if (keysym == XK_Home) {
+            cursorPosition = 0;
+            return true;
+        } else if (keysym == XK_End) {
+            cursorPosition = text.length();
+            return true;
+        } else if (count > 0) {
+            // Insert the typed character at cursor position
+            text.insert(cursorPosition, buffer, count);
+            cursorPosition += count;
+            return true;
+        }
+
+        return false;
+    }
+
+    // Widget implementation
+    void render(Display* display, Window window) override {
+        int width = getWidth();
+        int height = getHeight();
+
+        // Resize buffer if needed
+        if (!buffer || buffer->getWidth() != width || buffer->getHeight() != height) {
+            buffer = std::make_unique<RenderBuffer>(display, window, width, height);
+        }
+
+        // Clear buffer with background color
+        buffer->clear(backgroundColor);
+
+        // Draw border
+        unsigned long currentBorderColor = focused ? focusedBorderColor : borderColor;
+        buffer->drawRectangle(0, 0, width - 1, height - 1, currentBorderColor);
+
+        // Initialize font if needed
+        if (!font) {
+            std::cerr << "Warning: No font set for TextField" << std::endl;
+            return;
+        }
+
+        // Initialize colors if needed
+        if (!textColor) {
+            textColor = buffer->createXftColor(0, 0, 0);  // Black
+        }
+        if (!placeholderColor) {
+            placeholderColor = buffer->createXftColor(128, 128, 128);  // Gray
+        }
+
+        // Draw text or placeholder
+        std::string displayText = text.empty() ? placeholder : text;
+        XftColor* currentColor = text.empty() ? placeholderColor : textColor;
+
+        if (!displayText.empty()) {
+            int textWidth, textHeight, textAscent, textDescent;
+            buffer->getTextExtents(font, displayText, textWidth, textHeight, textAscent, textDescent);
+
+            // Draw text with vertical centering
+            int textY = (height + textAscent - textDescent) / 2;
+            buffer->drawText(padding, textY, displayText, font, currentColor);
+
+            // Draw cursor if focused
+            if (focused && !text.empty()) {
+                std::string textBeforeCursor = text.substr(0, cursorPosition);
+                int cursorX;
+                buffer->getTextExtents(font, textBeforeCursor, cursorX, textHeight, textAscent, textDescent);
+                cursorX += padding;  // Add padding
+
+                buffer->drawLine(cursorX, padding, cursorX, height - padding, currentBorderColor);
+            } else if (focused && text.empty()) {
+                // Draw cursor at beginning when text is empty
+                buffer->drawLine(padding, padding, padding, height - padding, currentBorderColor);
+            }
+        }
+    }
+
+    void draw(Display* display, Window window) {
+        render(display, window);
+        if (buffer) {
+            buffer->copyToWindow(window, getX(), getY());
+        }
+    }
+};
+```
+
+---
+
 ### Файл: `src/ui/widget.cppm`
 
 ```cpp
@@ -1315,6 +1731,9 @@ module;
 #include <memory>
 #include <X11/Xlib.h>
 #include <iostream>
+#include <functional>
+#include <string>
+#include <algorithm>
 
 import ui.event;
 import ui.event_listener;
@@ -1325,11 +1744,25 @@ export module ui.widget;
 export class Widget : public EventListener {
 protected:
     bool isDirty = false;
+    bool isVisible = true;
+    bool isEnabled = true;
+    std::string id;  // Уникальный идентификатор виджета
 
 public:
+    // Конструктор с идентификатором
+    Widget(const std::string& widgetId = "") : id(widgetId) {}
+
+    // Виртуальный деструктор для правильного удаления наследников
+    virtual ~Widget() = default;
+
     virtual void handleEvent(const Event& event) override {
+        // Обрабатываем события только если виджет включен
+        if (!isEnabled) return;
+
         for (auto& child : children) {
-            child->handleEvent(event);
+            if (child->isVisible) {
+                child->handleEvent(event);
+            }
         }
     }
 
@@ -1345,12 +1778,39 @@ public:
         if (this->width != width || this->height != height) {
             this->width = width;
             this->height = height;
-            
+
             // Recreate buffer if size changes
             if (buffer) {
                 buffer.reset();
             }
-            
+
+            markDirty();
+        }
+    }
+
+    // Метод для установки как позиции, так и размера одновременно
+    void setBounds(int x, int y, unsigned int width, unsigned int height) {
+        bool changed = false;
+
+        if (this->x != x || this->y != y) {
+            this->x = x;
+            this->y = y;
+            changed = true;
+        }
+
+        if (this->width != width || this->height != height) {
+            this->width = width;
+            this->height = height;
+
+            // Recreate buffer if size changes
+            if (buffer) {
+                buffer.reset();
+            }
+
+            changed = true;
+        }
+
+        if (changed) {
             markDirty();
         }
     }
@@ -1360,7 +1820,31 @@ public:
     unsigned int getWidth() const { return width; }
     unsigned int getHeight() const { return height; }
 
+    // Получение абсолютных координат (с учетом родителей)
+    void getAbsolutePosition(int& absX, int& absY) const {
+        absX = x;
+        absY = y;
+
+        const Widget* p = parent;
+        while (p) {
+            absX += p->x;
+            absY += p->y;
+            p = p->parent;
+        }
+    }
+
+    // Проверка, находится ли точка внутри виджета
+    bool containsPoint(int pointX, int pointY) const {
+        int absX, absY;
+        getAbsolutePosition(absX, absY);
+
+        return pointX >= absX && pointX < absX + static_cast<int>(width) &&
+               pointY >= absY && pointY < absY + static_cast<int>(height);
+    }
+
     virtual void render(Display* display, Window window) {
+        if (!isVisible) return;
+
         setWindow(window);
         // Only render if dirty
         if (isDirty) {
@@ -1393,6 +1877,8 @@ public:
     }
 
     virtual void paint(Display* display, Window window, GC gc) {
+        if (!isVisible) return;
+
         // Make sure we have a buffer
         ensureBuffer(display, window);
 
@@ -1418,6 +1904,14 @@ public:
         // Удалено создание события перерисовки, чтобы избежать рекурсии
     }
 
+    // Пометить как грязный этот виджет и все дочерние
+    void markDirtyRecursive() {
+        markDirty();
+        for (auto& child : children) {
+            child->markDirtyRecursive();
+        }
+    }
+
     virtual bool needsRepaint() const {
         return isDirty;
     }
@@ -1435,6 +1929,48 @@ public:
     void addChild(std::shared_ptr<Widget> child) {
         child->setParent(this);
         children.push_back(std::move(child));
+        markDirty(); // Добавление ребенка требует перерисовки
+    }
+
+    // Удаление дочернего виджета по указателю
+    bool removeChild(Widget* childPtr) {
+        auto it = std::find_if(children.begin(), children.end(),
+            [childPtr](const std::shared_ptr<Widget>& child) {
+                return child.get() == childPtr;
+            });
+
+        if (it != children.end()) {
+            (*it)->setParent(nullptr);
+            children.erase(it);
+            markDirty();
+            return true;
+        }
+        return false;
+    }
+
+    // Удаление дочернего виджета по ID
+    bool removeChildById(const std::string& childId) {
+        auto it = std::find_if(children.begin(), children.end(),
+            [&childId](const std::shared_ptr<Widget>& child) {
+                return child->getId() == childId;
+            });
+
+        if (it != children.end()) {
+            (*it)->setParent(nullptr);
+            children.erase(it);
+            markDirty();
+            return true;
+        }
+        return false;
+    }
+
+    // Очистка всех дочерних виджетов
+    void clearChildren() {
+        for (auto& child : children) {
+            child->setParent(nullptr);
+        }
+        children.clear();
+        markDirty();
     }
 
     std::vector<Widget*> getChildren() const {
@@ -1443,6 +1979,18 @@ public:
             rawPointers.push_back(child.get());
         }
         return rawPointers;
+    }
+
+    // Поиск дочернего виджета по ID (включая вложенные)
+    Widget* findChildById(const std::string& childId) {
+        if (id == childId) return this;
+
+        for (auto& child : children) {
+            Widget* found = child->findChildById(childId);
+            if (found) return found;
+        }
+
+        return nullptr;
     }
 
     // Метод для установки текущего окна
@@ -1454,6 +2002,73 @@ public:
     Window getWindow() const {
         return currentWindow;
     }
+
+    // Методы для управления видимостью
+    void setVisible(bool visible) {
+        if (isVisible != visible) {
+            isVisible = visible;
+            markDirty();
+        }
+    }
+
+    bool getVisible() const { return isVisible; }
+
+    // Методы для управления активностью
+    void setEnabled(bool enabled) {
+        if (isEnabled != enabled) {
+            isEnabled = enabled;
+            markDirty();
+        }
+    }
+
+    bool getEnabled() const { return isEnabled; }
+
+    // Методы для работы с ID
+    void setId(const std::string& newId) { id = newId; }
+    const std::string& getId() const { return id; }
+
+    void setX(int newX) {
+        if (this->x != newX) {
+            this->x = newX;
+            markDirty();
+        }
+    }
+
+    void setY(int newY) {
+        if (this->y != newY) {
+            this->y = newY;
+            markDirty();
+        }
+    }
+
+    void setWidth(unsigned int newWidth) {
+        if (this->width != newWidth) {
+            this->width = newWidth;
+
+            // Recreate buffer if size changes
+            if (buffer) {
+                buffer.reset();
+            }
+
+            markDirty();
+        }
+    }
+
+    void setHeight(unsigned int newHeight) {
+        if (this->height != newHeight) {
+            this->height = newHeight;
+
+            // Recreate buffer if size changes
+            if (buffer) {
+                buffer.reset();
+            }
+
+            markDirty();
+        }
+    }
+
+    // Получение родительского виджета
+    Widget* getParent() const { return parent; }
 
 private:
     Widget* parent = nullptr;  // Parent reference for propagating dirty state

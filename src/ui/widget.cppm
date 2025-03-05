@@ -299,6 +299,46 @@ public:
     void setId(const std::string& newId) { id = newId; }
     const std::string& getId() const { return id; }
 
+    void setX(int newX) {
+        if (this->x != newX) {
+            this->x = newX;
+            markDirty();
+        }
+    }
+
+    void setY(int newY) {
+        if (this->y != newY) {
+            this->y = newY;
+            markDirty();
+        }
+    }
+
+    void setWidth(unsigned int newWidth) {
+        if (this->width != newWidth) {
+            this->width = newWidth;
+
+            // Recreate buffer if size changes
+            if (buffer) {
+                buffer.reset();
+            }
+
+            markDirty();
+        }
+    }
+
+    void setHeight(unsigned int newHeight) {
+        if (this->height != newHeight) {
+            this->height = newHeight;
+
+            // Recreate buffer if size changes
+            if (buffer) {
+                buffer.reset();
+            }
+
+            markDirty();
+        }
+    }
+
     // Получение родительского виджета
     Widget* getParent() const { return parent; }
 

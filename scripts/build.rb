@@ -4,10 +4,13 @@ require 'digest'
 require 'json'
 
 # Добавляем флаги для FreeType и Xft
-freetype_flags = "`pkg-config --cflags freetype2`".strip
-xft_flags = "`pkg-config --cflags xft`".strip
-x11_flags = "`pkg-config --cflags x11`".strip
-compile_flags = "#{freetype_flags} #{xft_flags} #{x11_flags}"
+freetype_flags = `pkg-config --cflags freetype2`.strip
+xft_flags = `pkg-config --cflags xft`.strip
+x11_flags = `pkg-config --cflags x11`.strip
+compile_flags = "#{freetype_flags} #{xft_flags} #{x11_flags} -lX11 -lXft -lfreetype"
+
+# puts compile_flags
+# exit
 
 # Директория с исходными файлами
 src_dir = "src"
@@ -153,7 +156,7 @@ if rebuild_main
   module_files_list  = module_map.values.join(' ')
 
   # Итоговая команда
-  build_commands << "clang++ -std=c++20 #{main_path} #{module_files_flags} #{module_files_list} -lX11 -lXft -lfreetype -o #{output_executable}"
+  build_commands << "clang++ -std=c++20 #{main_path} #{module_files_flags} #{module_files_list} #{compile_flags} -o #{output_executable}" #  -lX11 -lXft -lfreetype
 end
 
 # Обновляем кэш
