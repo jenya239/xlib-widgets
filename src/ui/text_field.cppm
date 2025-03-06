@@ -108,15 +108,6 @@ public:
         }
 
         // Обрабатываем клавиатурные события, если в фокусе
-        // Удалите этот блок, так как он дублирует нижний блок
-         if (focused && event.getType() != Event::Type::Unknown) {
-             std::cerr << "TextField processing event " << event.getName() << static_cast<int>(event.getType()) <<
-               static_cast<int>(Event::Type::KeyDown) << std::endl;
-//             XKeyEvent keyCopy = event.getNativeEvent().xkey;
-//             handleKeyPress(keyCopy);
-         }
-
-        // Обрабатываем клавиатурные события, если в фокусе
         if (focused && event.getType() == Event::Type::KeyDown) {
             std::cerr << "TextField processing key press event" << std::endl;
             XKeyEvent keyCopy = event.getNativeEvent().xkey;

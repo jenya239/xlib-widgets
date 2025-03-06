@@ -13,6 +13,7 @@ import services.render_service;
 import ui.application;
 import ui.button;
 import ui.text_field;
+import ui.text_area;
 import ui.event;
 import ui.event_listener;
 
@@ -60,6 +61,11 @@ int main() {
         // Make sure the text field needs repainting
         textField->markDirty();
 
+        // Create a text area for multi-line text input
+        auto textArea = std::make_shared<TextArea>(50, 170, 250, 150, "Enter multi-line text here...");
+        textArea->setVisible(true);
+        textArea->markDirty();
+
         // Load and set font for the text field
         if (displayService) {
             XftFont* font = XftFontOpenName(
@@ -70,6 +76,7 @@ int main() {
 
             if (font) {
                 textField->setFont(font);
+                textArea->setFont(font);
                 logger->info("Font set for TextField");
             } else {
                 logger->error("Failed to load font for TextField");
@@ -79,6 +86,7 @@ int main() {
         // Add widgets to main window
         mainWindow->addChild(button);
         mainWindow->addChild(textField);
+        mainWindow->addChild(textArea);
 
         // Create a custom event listener for text field focus
         class TextFieldEventListener : public EventListener {
