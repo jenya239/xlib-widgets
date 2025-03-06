@@ -17,7 +17,6 @@ export class TextArea : public Widget {
 private:
     std::vector<std::string> lines;
     std::string placeholder;
-    std::unique_ptr<RenderBuffer> buffer;
     XftFont* font = nullptr;
     XftColor* textColor = nullptr;
     XftColor* placeholderColor = nullptr;
@@ -35,6 +34,13 @@ private:
     int scrollY = 0;  // Vertical scroll position
     int lineHeight = 0; // Will be calculated based on font
 
+    bool hasSelection = false;
+    int selectionStartRow = 0;
+    int selectionStartCol = 0;
+    int selectionEndRow = 0;
+    int selectionEndCol = 0;
+    unsigned long selectionColor = 0xADD8E6; // Light blue
+
 public:
     TextArea(int x, int y, int width, int height, const std::string& placeholder = "")
         : Widget(placeholder) {  // Use placeholder as the widget ID or use an empty string
@@ -50,13 +56,14 @@ public:
     }
 
     ~TextArea() {
-        if (buffer) {
+        RenderBuffer* currentBuffer = getBuffer();
+        if (currentBuffer) {
             if (textColor) {
-                buffer->freeXftColor(textColor);
+                currentBuffer->freeXftColor(textColor);
                 textColor = nullptr;
             }
             if (placeholderColor) {
-                buffer->freeXftColor(placeholderColor);
+                currentBuffer->freeXftColor(placeholderColor);
                 placeholderColor = nullptr;
             }
         }
@@ -136,13 +143,34 @@ public:
         if (event.getType() == Event::Type::MouseDown && isInside) {
             std::cerr << "TextArea clicked, setting focus to true" << std::endl;
             setFocus(true);
-            markDirty(); // Mark as dirty when gaining focus
 
-            // TODO: Add logic to set cursor position based on click position
+            // Set cursor position based on click position
+            setCursorPositionFromMouse(event.getX(), event.getY());
+
+            // Start selection
+            startSelection();
+
+            markDirty();
+        }
+        else if (event.getType() == Event::Type::MouseMove && isInside) {
+            // Update selection while dragging
+            if (event.getNativeEvent().xmotion.state & (Button1Mask | Button2Mask | Button3Mask)) {
+                setCursorPositionFromMouse(event.getX(), event.getY());
+                updateSelection();
+                markDirty();
+            }
+        }
+        else if (event.getType() == Event::Type::MouseUp) {
+            // Finalize selection
+            if (selectionStartRow == cursorRow && selectionStartCol == cursorCol) {
+                clearSelection();
+            }
+            markDirty();
         }
         else if (event.getType() == Event::Type::MouseDown && !isInside) {
             std::cerr << "Click outside TextArea, removing focus" << std::endl;
             setFocus(false);
+            clearSelection();
             markDirty(); // Mark as dirty when losing focus
         }
 
@@ -156,6 +184,71 @@ public:
 
         // Pass the event to the base class
         Widget::handleEvent(event);
+    }
+
+    void setCursorPositionFromMouse(int mouseX, int mouseY) {
+        if (!font) return;
+
+        // Get the buffer from the parent class instead of using the member variable directly
+        RenderBuffer* currentBuffer = getBuffer();
+        if (!currentBuffer) return;
+
+        // Adjust for padding and scroll
+        int localX = mouseX - getX() - padding + scrollX;
+        int localY = mouseY - getY() - padding + scrollY * lineHeight;
+
+        // Find the row
+        cursorRow = localY / lineHeight;
+        if (cursorRow < 0) cursorRow = 0;
+        if (cursorRow >= static_cast<int>(lines.size())) {
+            cursorRow = lines.size() - 1;
+        }
+
+        // Find the column by measuring text widths
+        const std::string& line = lines[cursorRow];
+        cursorCol = 0;
+
+        if (localX <= 0) {
+            cursorCol = 0;
+        } else {
+            // Binary search to find the closest character position
+            int left = 0;
+            int right = line.length();
+
+            while (left < right) {
+                int mid = (left + right) / 2;
+                std::string textToMid = line.substr(0, mid);
+
+                int textWidth, textHeight, textAscent, textDescent;
+                currentBuffer->getTextExtents(font, textToMid, textWidth, textHeight, textAscent, textDescent);
+
+                if (textWidth < localX) {
+                    left = mid + 1;
+                } else {
+                    right = mid;
+                }
+            }
+
+            cursorCol = left;
+
+            // Check if we should place cursor before or after the character
+            if (cursorCol > 0) {
+                std::string textBefore = line.substr(0, cursorCol - 1);
+                std::string textAt = line.substr(0, cursorCol);
+
+                int widthBefore, heightBefore, ascentBefore, descentBefore;
+                int widthAt, heightAt, ascentAt, descentAt;
+
+                currentBuffer->getTextExtents(font, textBefore, widthBefore, heightBefore, ascentBefore, descentBefore);
+                currentBuffer->getTextExtents(font, textAt, widthAt, heightAt, ascentAt, descentAt);
+
+                if (localX - widthBefore < widthAt - localX) {
+                    cursorCol--;
+                }
+            }
+        }
+
+        ensureCursorVisible();
     }
 
     bool handleKeyPress(XKeyEvent& event) {
@@ -204,84 +297,122 @@ public:
         return false;
     }
 
-    void paintToBuffer(Display* display) override {
-        // Get the buffer from the parent class
-        ensureBuffer(display, getWindow());
-        RenderBuffer* buffer = getBuffer();
-        if (!buffer) return;
+void paintToBuffer(Display* display) override {
+    // Get the buffer from the parent class
+    ensureBuffer(display, getWindow());
+    RenderBuffer* currentBuffer = getBuffer();
+    if (!currentBuffer) return;
 
-        int width = getWidth();
-        int height = getHeight();
+    int width = getWidth();
+    int height = getHeight();
 
-        // Clear buffer with background color
-        buffer->clear(backgroundColor);
+    // Clear buffer with background color
+    currentBuffer->clear(backgroundColor);
 
-        // Draw border
-        unsigned long currentBorderColor = focused ? focusedBorderColor : borderColor;
-        buffer->drawRectangle(0, 0, width - 1, height - 1, currentBorderColor);
-        std::cerr << "text area paintToBuffer drawRectangle" << std::endl;
+    // Draw border
+    unsigned long currentBorderColor = focused ? focusedBorderColor : borderColor;
+    currentBuffer->drawRectangle(0, 0, width - 1, height - 1, currentBorderColor);
+    std::cerr << "text area paintToBuffer drawRectangle" << std::endl;
 
-        // Initialize font if needed
-        if (!font) {
-            std::cerr << "Warning: No font set for TextArea" << std::endl;
-            return;
+    // Initialize font if needed
+    if (!font) {
+        std::cerr << "Warning: No font set for TextArea" << std::endl;
+        return;
+    }
+
+    // Initialize colors if needed
+    if (!textColor) {
+        textColor = currentBuffer->createXftColor(0, 0, 0);  // Black
+    }
+    if (!placeholderColor) {
+        placeholderColor = currentBuffer->createXftColor(128, 128, 128);  // Gray
+    }
+
+    // Rest of the method remains the same, but replace all instances of 'buffer' with 'currentBuffer'
+    // For example:
+    // buffer->drawText(...) becomes currentBuffer->drawText(...)
+
+    // Draw text or placeholder
+    bool isEmpty = lines.size() == 1 && lines[0].empty();
+    XftColor* currentColor = isEmpty ? placeholderColor : textColor;
+
+    if (isEmpty && !placeholder.empty()) {
+        // Draw placeholder text
+        int textWidth, textHeight, textAscent, textDescent;
+        currentBuffer->getTextExtents(font, placeholder, textWidth, textHeight, textAscent, textDescent);
+
+        // Draw text with vertical centering for placeholder
+        int textY = (height + textAscent - textDescent) / 2;
+        currentBuffer->drawText(padding, textY, placeholder, font, currentColor);
+
+        // Draw cursor at beginning if focused
+        if (focused) {
+            currentBuffer->drawLine(padding, padding, padding, height - padding, currentBorderColor);
         }
+    } else {
+        // Draw actual text lines
+        int y = padding + font->ascent;
 
-        // Initialize colors if needed
-        if (!textColor) {
-            textColor = buffer->createXftColor(0, 0, 0);  // Black
-        }
-        if (!placeholderColor) {
-            placeholderColor = buffer->createXftColor(128, 128, 128);  // Gray
-        }
+        for (size_t i = scrollY; i < lines.size() && y < height - padding; ++i) {
+            const std::string& line = lines[i];
 
-        // Draw text or placeholder
-        bool isEmpty = lines.size() == 1 && lines[0].empty();
-        XftColor* currentColor = isEmpty ? placeholderColor : textColor;
-
-        if (isEmpty && !placeholder.empty()) {
-            // Draw placeholder text
-            int textWidth, textHeight, textAscent, textDescent;
-            buffer->getTextExtents(font, placeholder, textWidth, textHeight, textAscent, textDescent);
-
-            // Draw text with vertical centering for placeholder
-            int textY = (height + textAscent - textDescent) / 2;
-            buffer->drawText(padding, textY, placeholder, font, currentColor);
-
-            // Draw cursor at beginning if focused
-            if (focused) {
-                buffer->drawLine(padding, padding, padding, height - padding, currentBorderColor);
-            }
-        } else {
-            // Draw actual text lines
-            int y = padding + font->ascent;
-
-            for (size_t i = scrollY; i < lines.size() && y < height - padding; ++i) {
-                const std::string& line = lines[i];
-
-                // Skip if line is empty and not the current cursor line
-                if (line.empty() && static_cast<int>(i) != cursorRow) {
-                    y += lineHeight;
-                    continue;
-                }
-
-                // Draw the line
-                buffer->drawText(padding - scrollX, y, line, font, textColor);
-
-                // Draw cursor if this is the current line and we're focused
-                if (focused && static_cast<int>(i) == cursorRow) {
-                    std::string textBeforeCursor = line.substr(0, cursorCol);
-                    int cursorX, textHeight, textAscent, textDescent;
-                    buffer->getTextExtents(font, textBeforeCursor, cursorX, textHeight, textAscent, textDescent);
-                    cursorX += padding - scrollX;  // Add padding and adjust for scroll
-
-                    buffer->drawLine(cursorX, y - font->ascent, cursorX, y + font->descent, currentBorderColor);
-                }
-
+            // Skip if line is empty and not the current cursor line
+            if (line.empty() && static_cast<int>(i) != cursorRow) {
                 y += lineHeight;
+                continue;
             }
+
+            // Draw selection background if needed
+            if (hasSelection) {
+                int startRow = std::min(selectionStartRow, selectionEndRow);
+                int endRow = std::max(selectionStartRow, selectionEndRow);
+
+                if (i >= startRow && i <= endRow) {
+                    int startCol = 0;
+                    int endCol = line.length();
+
+                    if (i == startRow) {
+                        startCol = std::min(selectionStartCol, selectionEndCol);
+                    }
+                    if (i == endRow) {
+                        endCol = std::max(selectionStartCol, selectionEndCol);
+                    }
+
+                    if (startCol < endCol) {
+                        std::string textBeforeSelection = line.substr(0, startCol);
+                        std::string selectedText = line.substr(startCol, endCol - startCol);
+
+                        int startX, textHeight, textAscent, textDescent;
+                        int endX;
+
+                        currentBuffer->getTextExtents(font, textBeforeSelection, startX, textHeight, textAscent, textDescent);
+                        currentBuffer->getTextExtents(font, selectedText, endX, textHeight, textAscent, textDescent);
+
+                        startX += padding - scrollX;
+
+                        // Draw selection background
+                        currentBuffer->fillRectangle(startX, y - font->ascent, endX, font->ascent + font->descent, selectionColor);
+                    }
+                }
+            }
+
+            // Draw the line
+            currentBuffer->drawText(padding - scrollX, y, line, font, textColor);
+
+            // Draw cursor if this is the current line and we're focused
+            if (focused && static_cast<int>(i) == cursorRow) {
+                std::string textBeforeCursor = line.substr(0, cursorCol);
+                int cursorX, textHeight, textAscent, textDescent;
+                currentBuffer->getTextExtents(font, textBeforeCursor, cursorX, textHeight, textAscent, textDescent);
+                cursorX += padding - scrollX;  // Add padding and adjust for scroll
+
+                currentBuffer->drawLine(cursorX, y - font->ascent, cursorX, y + font->descent, currentBorderColor);
+            }
+
+            y += lineHeight;
         }
     }
+}
 
 private:
     // Helper methods for key handling
@@ -402,8 +533,10 @@ private:
         if (cursorCol > 0) {
             std::string textBeforeCursor = lines[cursorRow].substr(0, cursorCol);
             int textWidth, textHeight, textAscent, textDescent;
-            if (buffer) {
-                buffer->getTextExtents(font, textBeforeCursor, textWidth, textHeight, textAscent, textDescent);
+
+            RenderBuffer* currentBuffer = getBuffer();
+            if (currentBuffer) {
+                currentBuffer->getTextExtents(font, textBeforeCursor, textWidth, textHeight, textAscent, textDescent);
 
                 if (textWidth < scrollX) {
                     scrollX = std::max(0, textWidth - visibleWidth / 4);
@@ -417,5 +550,46 @@ private:
                 scrollX = 0;
             }
         }
+    }
+
+    // Add methods for selection
+    void startSelection() {
+        hasSelection = true;
+        selectionStartRow = cursorRow;
+        selectionStartCol = cursorCol;
+        selectionEndRow = cursorRow;
+        selectionEndCol = cursorCol;
+    }
+
+    void updateSelection() {
+        selectionEndRow = cursorRow;
+        selectionEndCol = cursorCol;
+    }
+
+    void clearSelection() {
+        hasSelection = false;
+    }
+
+    bool isPositionSelected(int row, int col) {
+        if (!hasSelection) return false;
+
+        // Normalize selection coordinates
+        int startRow = std::min(selectionStartRow, selectionEndRow);
+        int endRow = std::max(selectionStartRow, selectionEndRow);
+        int startCol = (startRow == selectionStartRow) ? selectionStartCol : selectionEndCol;
+        int endCol = (endRow == selectionEndRow) ? selectionEndCol : selectionStartCol;
+
+        if (startRow == endRow) {
+            // Selection on single line
+            startCol = std::min(selectionStartCol, selectionEndCol);
+            endCol = std::max(selectionStartCol, selectionEndCol);
+            return (row == startRow && col >= startCol && col < endCol);
+        }
+
+        // Selection spans multiple lines
+        if (row < startRow || row > endRow) return false;
+        if (row == startRow) return col >= startCol;
+        if (row == endRow) return col < endCol;
+        return true;
     }
 };
