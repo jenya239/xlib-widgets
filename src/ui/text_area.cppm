@@ -165,32 +165,40 @@ public:
         KeySym keysym;
         int count = XLookupString(&event, buffer, sizeof(buffer), &keysym, nullptr);
 
+        bool result = false;
+
         // Handle basic navigation keys
         if (keysym == XK_BackSpace) {
-            return handleBackspace();
+            result = handleBackspace();
         } else if (keysym == XK_Delete) {
-            return handleDelete();
+            result = handleDelete();
         } else if (keysym == XK_Left) {
-            return handleLeftArrow();
+            result = handleLeftArrow();
         } else if (keysym == XK_Right) {
-            return handleRightArrow();
+            result = handleRightArrow();
         } else if (keysym == XK_Up) {
-            return handleUpArrow();
+            result = handleUpArrow();
         } else if (keysym == XK_Down) {
-            return handleDownArrow();
+            result = handleDownArrow();
         } else if (keysym == XK_Home) {
             cursorCol = 0;
-            return true;
+            result = true;
         } else if (keysym == XK_End) {
             cursorCol = lines[cursorRow].length();
-            return true;
+            result = true;
         } else if (keysym == XK_Return || keysym == XK_KP_Enter) {
-            return handleEnter();
-        } else if (count > 0) {
+            result = handleEnter();
+        } else if (keysym == XK_Tab) {
+            result = handleTab();
+        }  else if (count > 0) {
             // Insert the typed character at cursor position
             lines[cursorRow].insert(cursorCol, buffer, count);
             cursorCol += count;
-            return true;
+            result = true;
+        }
+
+        if (result) {
+            ensureCursorVisible();
         }
 
         return false;
@@ -365,5 +373,49 @@ private:
         cursorRow++;
         cursorCol = 0;
         return true;
+    }
+
+    bool handleTab() {
+        // Insert 2 spaces for a tab
+        const std::string tabSpaces = "  ";
+        lines[cursorRow].insert(cursorCol, tabSpaces);
+        cursorCol += tabSpaces.length();
+        return true;
+    }
+
+    void ensureCursorVisible() {
+        if (!font) return;
+
+        // Calculate visible area
+        int visibleWidth = getWidth() - 2 * padding;
+        int visibleHeight = getHeight() - 2 * padding;
+        int visibleLines = visibleHeight / lineHeight;
+
+        // Vertical scrolling
+        if (cursorRow < scrollY) {
+            scrollY = cursorRow;
+        } else if (cursorRow >= scrollY + visibleLines) {
+            scrollY = cursorRow - visibleLines + 1;
+        }
+
+        // Horizontal scrolling - need to calculate text width
+        if (cursorCol > 0) {
+            std::string textBeforeCursor = lines[cursorRow].substr(0, cursorCol);
+            int textWidth, textHeight, textAscent, textDescent;
+            if (buffer) {
+                buffer->getTextExtents(font, textBeforeCursor, textWidth, textHeight, textAscent, textDescent);
+
+                if (textWidth < scrollX) {
+                    scrollX = std::max(0, textWidth - visibleWidth / 4);
+                } else if (textWidth > scrollX + visibleWidth) {
+                    scrollX = textWidth - visibleWidth + 10; // 10px buffer
+                }
+            }
+        } else {
+            // If cursor is at the beginning, scroll to the start
+            if (cursorCol == 0) {
+                scrollX = 0;
+            }
+        }
     }
 };
