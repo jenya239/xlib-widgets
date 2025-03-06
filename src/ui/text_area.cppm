@@ -262,11 +262,12 @@ public:
 
         bool result = false;
 
-        // Check for Ctrl key
+        // Check for modifier keys
         bool ctrlPressed = (event.state & ControlMask);
+        bool shiftPressed = (event.state & ShiftMask);
 
         // Handle copy/paste shortcuts
-        if (ctrlPressed) {
+        if (ctrlPressed && !shiftPressed) {
             if (keysym == XK_c || keysym == XK_C) {
                 // Ctrl+C: Copy
                 copyToClipboard();
@@ -291,41 +292,153 @@ public:
             }
         }
 
-        // Handle basic navigation keys
+        // Start selection if Shift is pressed and we don't have a selection yet
+        if (shiftPressed && !hasSelection) {
+            startSelection();
+        }
+
+        // Handle navigation keys with selection
         if (keysym == XK_BackSpace) {
-            result = handleBackspace();
+            if (hasSelection) {
+                deleteSelectedText();
+                result = true;
+            } else {
+                result = handleBackspace();
+            }
         } else if (keysym == XK_Delete) {
-            result = handleDelete();
+            if (hasSelection) {
+                deleteSelectedText();
+                result = true;
+            } else {
+                result = handleDelete();
+            }
         } else if (keysym == XK_Left) {
-            result = handleLeftArrow();
+            if (ctrlPressed) {
+                // Ctrl+Left: Move to previous word
+                if (cursorCol > 0) {
+                    auto boundaries = findWordBoundaries(cursorRow, cursorCol - 1);
+                    cursorCol = boundaries.first;
+                } else if (cursorRow > 0) {
+                    cursorRow--;
+                    cursorCol = lines[cursorRow].length();
+                }
+            } else {
+                // Regular left arrow
+                if (cursorCol > 0) {
+                    cursorCol--;
+                } else if (cursorRow > 0) {
+                    cursorRow--;
+                    cursorCol = lines[cursorRow].length();
+                }
+            }
+
+            if (shiftPressed) {
+                // Update selection if Shift is pressed
+                updateSelection();
+            } else {
+                // Clear selection if no Shift
+                clearSelection();
+            }
+            result = true;
         } else if (keysym == XK_Right) {
-            result = handleRightArrow();
+            if (ctrlPressed) {
+                // Ctrl+Right: Move to next word
+                if (cursorCol < static_cast<int>(lines[cursorRow].length())) {
+                    auto boundaries = findWordBoundaries(cursorRow, cursorCol);
+                    cursorCol = boundaries.second;
+                } else if (cursorRow < static_cast<int>(lines.size()) - 1) {
+                    cursorRow++;
+                    cursorCol = 0;
+                }
+            } else {
+                // Regular right arrow
+                if (cursorCol < static_cast<int>(lines[cursorRow].length())) {
+                    cursorCol++;
+                } else if (cursorRow < static_cast<int>(lines.size()) - 1) {
+                    cursorRow++;
+                    cursorCol = 0;
+                }
+            }
+
+            if (shiftPressed) {
+                // Update selection if Shift is pressed
+                updateSelection();
+            } else {
+                // Clear selection if no Shift
+                clearSelection();
+            }
+            result = true;
         } else if (keysym == XK_Up) {
-            result = handleUpArrow();
+            if (cursorRow > 0) {
+                cursorRow--;
+                // Adjust column if the new line is shorter
+                cursorCol = std::min(cursorCol, static_cast<int>(lines[cursorRow].length()));
+            }
+
+            if (shiftPressed) {
+                updateSelection();
+            } else {
+                clearSelection();
+            }
+            result = true;
         } else if (keysym == XK_Down) {
-            result = handleDownArrow();
+            if (cursorRow < static_cast<int>(lines.size()) - 1) {
+                cursorRow++;
+                // Adjust column if the new line is shorter
+                cursorCol = std::min(cursorCol, static_cast<int>(lines[cursorRow].length()));
+            }
+
+            if (shiftPressed) {
+                updateSelection();
+            } else {
+                clearSelection();
+            }
+            result = true;
         } else if (keysym == XK_Home) {
             cursorCol = 0;
+
+            if (shiftPressed) {
+                updateSelection();
+            } else {
+                clearSelection();
+            }
             result = true;
         } else if (keysym == XK_End) {
             cursorCol = lines[cursorRow].length();
+
+            if (shiftPressed) {
+                updateSelection();
+            } else {
+                clearSelection();
+            }
             result = true;
         } else if (keysym == XK_Return || keysym == XK_KP_Enter) {
+            if (hasSelection) {
+                deleteSelectedText();
+            }
             result = handleEnter();
         } else if (keysym == XK_Tab) {
+            if (hasSelection) {
+                deleteSelectedText();
+            }
             result = handleTab();
-        }  else if (count > 0) {
+        } else if (count > 0 && !ctrlPressed) {
             // Insert the typed character at cursor position
+            if (hasSelection) {
+                deleteSelectedText();
+            }
             lines[cursorRow].insert(cursorCol, buffer, count);
             cursorCol += count;
+            clearSelection();
             result = true;
         }
 
         if (result) {
             ensureCursorVisible();
+            markDirty();
         }
 
-        return false;
+        return result;
     }
 
 void paintToBuffer(Display* display) override {
@@ -756,5 +869,29 @@ private:
         }
 
         return result;
+    }
+
+    // Find word boundaries (for Ctrl+Shift selection)
+    std::pair<int, int> findWordBoundaries(int row, int col) {
+        const std::string& line = lines[row];
+        int start = col;
+        int end = col;
+
+        // Define what characters are part of a word
+        auto isWordChar = [](char c) {
+            return std::isalnum(c) || c == '_';
+        };
+
+        // Find start of word
+        while (start > 0 && isWordChar(line[start - 1])) {
+            start--;
+        }
+
+        // Find end of word
+        while (end < static_cast<int>(line.length()) && isWordChar(line[end])) {
+            end++;
+        }
+
+        return {start, end};
     }
 };
