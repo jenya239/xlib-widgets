@@ -41,6 +41,8 @@ private:
     int selectionEndCol = 0;
     unsigned long selectionColor = 0xADD8E6; // Light blue
 
+    std::string clipboardText;
+
 public:
     TextArea(int x, int y, int width, int height, const std::string& placeholder = "")
         : Widget(placeholder) {  // Use placeholder as the widget ID or use an empty string
@@ -259,6 +261,35 @@ public:
         int count = XLookupString(&event, buffer, sizeof(buffer), &keysym, nullptr);
 
         bool result = false;
+
+        // Check for Ctrl key
+        bool ctrlPressed = (event.state & ControlMask);
+
+        // Handle copy/paste shortcuts
+        if (ctrlPressed) {
+            if (keysym == XK_c || keysym == XK_C) {
+                // Ctrl+C: Copy
+                copyToClipboard();
+                return true;
+            } else if (keysym == XK_v || keysym == XK_V) {
+                // Ctrl+V: Paste
+                pasteFromClipboard();
+                return true;
+            } else if (keysym == XK_x || keysym == XK_X) {
+                // Ctrl+X: Cut
+                copyToClipboard();
+                deleteSelectedText();
+                return true;
+            } else if (keysym == XK_a || keysym == XK_A) {
+                // Ctrl+A: Select All
+                selectionStartRow = 0;
+                selectionStartCol = 0;
+                selectionEndRow = lines.size() - 1;
+                selectionEndCol = lines[selectionEndRow].length();
+                hasSelection = true;
+                return true;
+            }
+        }
 
         // Handle basic navigation keys
         if (keysym == XK_BackSpace) {
@@ -591,5 +622,139 @@ private:
         if (row == startRow) return col >= startCol;
         if (row == endRow) return col < endCol;
         return true;
+    }
+    // Copy selected text to clipboard
+    void copyToClipboard() {
+        if (!hasSelection) return;
+
+        // Get selected text
+        std::string selectedText = getSelectedText();
+        if (selectedText.empty()) return;
+
+        // Store the text for later paste requests
+        clipboardText = selectedText;
+
+        // For a more complete implementation, you would need to integrate with the X11 clipboard
+        // This simplified version just stores text internally
+    }
+
+    // Get text from clipboard
+    void pasteFromClipboard() {
+        // For a more complete implementation, you would need to integrate with the X11 clipboard
+        // This simplified version just uses the internally stored text
+
+        if (!clipboardText.empty()) {
+            insertText(clipboardText);
+        }
+    }
+
+    // Insert text at current cursor position
+    void insertText(const std::string& text) {
+        // Delete selected text if there's a selection
+        if (hasSelection) {
+            deleteSelectedText();
+        }
+
+        // Split the text by newlines
+        size_t start = 0;
+        size_t end = text.find('\n');
+
+        // Insert first segment on current line
+        lines[cursorRow].insert(cursorCol, text.substr(start, end == std::string::npos ? end : end - start));
+        cursorCol += (end == std::string::npos ? text.length() : end - start);
+
+        // Process remaining lines if any
+        while (end != std::string::npos) {
+            start = end + 1;
+            end = text.find('\n', start);
+
+            // Create a new line
+            handleEnter();
+
+            // Add text to the new line
+            std::string segment = text.substr(start, end == std::string::npos ? end : end - start);
+            lines[cursorRow].insert(cursorCol, segment);
+            cursorCol += segment.length();
+        }
+
+        markDirty();
+    }
+
+    // Delete selected text
+    void deleteSelectedText() {
+        if (!hasSelection) return;
+
+        // Normalize selection coordinates
+        int startRow = std::min(selectionStartRow, selectionEndRow);
+        int endRow = std::max(selectionStartRow, selectionEndRow);
+        int startCol, endCol;
+
+        if (startRow == endRow) {
+            startCol = std::min(selectionStartCol, selectionEndCol);
+            endCol = std::max(selectionStartCol, selectionEndCol);
+
+            // Delete text on single line
+            lines[startRow].erase(startCol, endCol - startCol);
+        } else {
+            // Handle multi-line selection
+            startCol = (startRow == selectionStartRow) ? selectionStartCol : selectionEndCol;
+            endCol = (endRow == selectionEndRow) ? selectionEndCol : selectionStartCol;
+
+            // Keep the start of the first line and the end of the last line
+            std::string startText = lines[startRow].substr(0, startCol);
+            std::string endText = lines[endRow].substr(endCol);
+
+            // Combine them
+            lines[startRow] = startText + endText;
+
+            // Remove the lines in between
+            lines.erase(lines.begin() + startRow + 1, lines.begin() + endRow + 1);
+        }
+
+        // Move cursor to start of selection
+        cursorRow = startRow;
+        cursorCol = startCol;
+
+        // Clear selection
+        clearSelection();
+        markDirty();
+    }
+
+    // Get selected text
+    std::string getSelectedText() const {
+        if (!hasSelection) return "";
+
+        // Normalize selection coordinates
+        int startRow = std::min(selectionStartRow, selectionEndRow);
+        int endRow = std::max(selectionStartRow, selectionEndRow);
+        int startCol, endCol;
+
+        std::string result;
+
+        if (startRow == endRow) {
+            startCol = std::min(selectionStartCol, selectionEndCol);
+            endCol = std::max(selectionStartCol, selectionEndCol);
+
+            // Get text from single line
+            result = lines[startRow].substr(startCol, endCol - startCol);
+        } else {
+            // Handle multi-line selection
+            startCol = (startRow == selectionStartRow) ? selectionStartCol : selectionEndCol;
+            endCol = (endRow == selectionEndRow) ? selectionEndCol : selectionStartCol;
+
+            // First line
+            result = lines[startRow].substr(startCol);
+            result += '\n';
+
+            // Middle lines
+            for (int i = startRow + 1; i < endRow; i++) {
+                result += lines[i] + '\n';
+            }
+
+            // Last line
+            result += lines[endRow].substr(0, endCol);
+        }
+
+        return result;
     }
 };
