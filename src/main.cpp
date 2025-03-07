@@ -10,6 +10,7 @@ import services.xdisplay_service;
 import services.event_loop_service;
 import services.logger_service;
 import services.render_service;
+import state.app_signals;
 import ui.application;
 import ui.button;
 import ui.text_field;
@@ -71,6 +72,13 @@ int main() {
         auto fileBrowser = std::make_shared<FileBrowser>(320, 50, 450, 370, "/home");
         fileBrowser->setVisible(true);
         fileBrowser->markDirty();
+
+        getFileSelectedSignal()->connect([logger](const auto& payload) {
+            if (!payload.isDirectory) {
+//              loadFile(payload.filePath);
+                logger->info("file selected " + payload.filePath);
+            }
+        });
 
         // Load and set font for the text field
         if (displayService) {

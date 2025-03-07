@@ -11,6 +11,7 @@ module;
 
 export module ui.file_browser;
 
+import state.app_signals;
 import ui.widget;
 import ui.render_buffer;
 import ui.event;
@@ -213,17 +214,24 @@ public:
         if (selectedIndex >= 0 && selectedIndex < static_cast<int>(entries.size())) {
             const auto& entry = entries[selectedIndex];
 
+            const auto fullPath = currentPath / entry.name;
+
             if (entry.isDirectory) {
                 // Navigate to directory
                 if (entry.isParentDir) {
                     setPath(currentPath.parent_path());
                 } else {
-                    setPath(currentPath / entry.name);
+                    setPath(fullPath);
                 }
             } else if (onFileSelected) {
-                // Call the callback with the selected file path
-                onFileSelected(currentPath / entry.name);
+                onFileSelected(fullPath);
             }
+
+            getFileSelectedSignal()->emit({
+                .filePath = fullPath,
+                .fileName = entry.name,
+                .isDirectory = entry.isDirectory
+            });
         }
     }
 
