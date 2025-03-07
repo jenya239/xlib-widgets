@@ -16,7 +16,7 @@ private:
     Display* display = nullptr;
     Window xWindow = 0;  // Use X11's Window type
     std::string title = "Application Window";
-    int width = 800;
+    int width = 1200;
     int height = 600;
 
 public:

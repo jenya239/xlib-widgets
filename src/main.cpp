@@ -26,7 +26,7 @@ int main() {
         auto app = std::make_shared<Application>();
 
         // Create main window
-        if (!app->createMainWindow("Simple Test Application", 600, 400)) {
+        if (!app->createMainWindow("file browser", 900, 500)) {
             std::cerr << "Failed to create main window" << std::endl;
             return 1;
         }
@@ -68,7 +68,7 @@ int main() {
         textArea->markDirty();
 
         // Create a file browser
-        auto fileBrowser = std::make_shared<FileBrowser>(320, 50, 250, 270, "/home");
+        auto fileBrowser = std::make_shared<FileBrowser>(320, 50, 450, 370, "/home");
         fileBrowser->setVisible(true);
         fileBrowser->markDirty();
 
@@ -77,7 +77,7 @@ int main() {
             XftFont* font = XftFontOpenName(
                 displayService,
                 DefaultScreen(displayService),
-                "Sans-12"
+                "Monospace-10"
             );
 
             if (font) {

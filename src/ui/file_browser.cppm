@@ -183,6 +183,18 @@ public:
                     markDirty();
                 }
             }
+            else if (keysym == XK_Page_Up) {
+                int visibleLines = (getHeight() - 2 * padding - lineHeight) / lineHeight;
+                selectedIndex = std::max(0, selectedIndex - visibleLines);
+                ensureSelectedVisible();
+                markDirty();
+            }
+            else if (keysym == XK_Page_Down) {
+                int visibleLines = (getHeight() - 2 * padding - lineHeight) / lineHeight;
+                selectedIndex = std::min(static_cast<int>(entries.size()) - 1, selectedIndex + visibleLines);
+                ensureSelectedVisible();
+                markDirty();
+            }
             else if (keysym == XK_Return || keysym == XK_KP_Enter) {
                 handleEntryActivation();
             }
@@ -216,15 +228,22 @@ public:
     }
 
     void ensureSelectedVisible() {
-        int visibleLines = (getHeight() - 2 * padding) / lineHeight;
+        int headerHeight = padding + lineHeight + padding/2 + padding; // Path + separator
+        int visibleLines = (getHeight() - headerHeight - padding) / lineHeight;
 
+        // If selected item is above the visible area
         if (selectedIndex < scrollOffset) {
             scrollOffset = selectedIndex;
-        } else if (selectedIndex >= scrollOffset + visibleLines) {
+        }
+        // If selected item is below the visible area
+        else if (selectedIndex >= scrollOffset + visibleLines) {
             scrollOffset = selectedIndex - visibleLines + 1;
         }
 
+        // Ensure scroll offset is valid
         if (scrollOffset < 0) scrollOffset = 0;
+        int maxScroll = std::max(0, static_cast<int>(entries.size()) - visibleLines);
+        if (scrollOffset > maxScroll) scrollOffset = maxScroll;
     }
 
     void paintToBuffer(Display* display) override {
