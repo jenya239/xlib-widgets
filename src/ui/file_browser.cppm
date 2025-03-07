@@ -51,8 +51,15 @@ private:
     Time lastClickTime = 0;
 
 public:
-    FileBrowser(const std::string& widgetId = "")
-        : Widget(widgetId), currentPath(std::filesystem::current_path()) {
+    FileBrowser(int x, int y, int width, int height, const std::string& path = "", const std::string& widgetId = "")
+        : Widget(widgetId), currentPath(path.empty() ? std::filesystem::current_path() : std::filesystem::path(path)) {
+        // Set position and size manually
+        setX(x);
+        setY(y);
+        setWidth(width);
+        setHeight(height);
+
+        // Initialize file browser
         refreshEntries();
     }
 

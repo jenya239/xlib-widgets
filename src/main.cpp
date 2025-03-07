@@ -14,6 +14,7 @@ import ui.application;
 import ui.button;
 import ui.text_field;
 import ui.text_area;
+import ui.file_browser;
 import ui.event;
 import ui.event_listener;
 
@@ -66,6 +67,11 @@ int main() {
         textArea->setVisible(true);
         textArea->markDirty();
 
+        // Create a file browser
+        auto fileBrowser = std::make_shared<FileBrowser>(320, 50, 250, 270, "/home");
+        fileBrowser->setVisible(true);
+        fileBrowser->markDirty();
+
         // Load and set font for the text field
         if (displayService) {
             XftFont* font = XftFontOpenName(
@@ -77,6 +83,7 @@ int main() {
             if (font) {
                 textField->setFont(font);
                 textArea->setFont(font);
+                fileBrowser->setFont(font);
                 logger->info("Font set for TextField");
             } else {
                 logger->error("Failed to load font for TextField");
@@ -87,6 +94,7 @@ int main() {
         mainWindow->addChild(button);
         mainWindow->addChild(textField);
         mainWindow->addChild(textArea);
+        mainWindow->addChild(fileBrowser);
 
         // Create a custom event listener for text field focus
         class TextFieldEventListener : public EventListener {
