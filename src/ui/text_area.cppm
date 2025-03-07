@@ -43,6 +43,12 @@ private:
 
     std::string clipboardText;
 
+    // Constants for scrollbar
+    static constexpr int scrollbarWidth = 10;
+    static constexpr int scrollbarMinLength = 20;
+    unsigned long scrollbarColor = 0x888888;
+    unsigned long scrollbarThumbColor = 0x444444;
+
 public:
     TextArea(int x, int y, int width, int height, const std::string& placeholder = "")
         : Widget(placeholder) {  // Use placeholder as the widget ID or use an empty string
@@ -491,7 +497,7 @@ void paintToBuffer(Display* display) override {
 
         // Draw cursor at beginning if focused
         if (focused) {
-            currentBuffer->drawLine(padding, padding, padding, height - padding, currentBorderColor);
+            currentBuffer->drawLine(padding, padding, padding, 20, currentBorderColor);
         }
     } else {
         // Draw actual text lines
@@ -555,6 +561,12 @@ void paintToBuffer(Display* display) override {
 
             y += lineHeight;
         }
+
+        // Draw vertical scrollbar if needed
+        drawVerticalScrollbar(currentBuffer, width, height);
+
+        // Draw horizontal scrollbar if needed
+        drawHorizontalScrollbar(currentBuffer, width, height);
     }
 }
 
@@ -893,5 +905,65 @@ private:
         }
 
         return {start, end};
+    }
+
+    // Draw vertical scrollbar
+    void drawVerticalScrollbar(RenderBuffer* buffer, int width, int height) {
+        int totalLines = lines.size();
+        int visibleLines = (height - 2 * padding) / lineHeight;
+
+        // Only draw scrollbar if we have more lines than can be displayed
+        if (totalLines <= visibleLines) return;
+
+        // Calculate scrollbar dimensions
+        int scrollbarHeight = height - 2 * padding;
+        int scrollbarX = width - scrollbarWidth - padding / 2;
+        int scrollbarY = padding;
+
+        // Draw scrollbar background
+        buffer->fillRectangle(scrollbarX, scrollbarY, scrollbarWidth, scrollbarHeight, scrollbarColor);
+
+        // Calculate thumb position and size
+        float thumbRatio = static_cast<float>(visibleLines) / totalLines;
+        int thumbHeight = std::max(scrollbarMinLength, static_cast<int>(scrollbarHeight * thumbRatio));
+        int thumbY = scrollbarY + static_cast<int>((scrollbarHeight - thumbHeight) *
+                                                  (static_cast<float>(scrollY) / (totalLines - visibleLines)));
+
+        // Draw thumb
+        buffer->fillRectangle(scrollbarX, thumbY, scrollbarWidth, thumbHeight, scrollbarThumbColor);
+    }
+
+    // Draw horizontal scrollbar
+    void drawHorizontalScrollbar(RenderBuffer* buffer, int width, int height) {
+        // Find the maximum line width
+        int maxLineWidth = 0;
+        for (const auto& line : lines) {
+            int lineWidth, textHeight, textAscent, textDescent;
+            buffer->getTextExtents(font, line, lineWidth, textHeight, textAscent, textDescent);
+            maxLineWidth = std::max(maxLineWidth, lineWidth);
+        }
+
+        int visibleWidth = width - 2 * padding - scrollbarWidth;
+
+        // Only draw scrollbar if content is wider than visible area
+        if (maxLineWidth <= visibleWidth) return;
+
+        // Calculate scrollbar dimensions
+        int scrollbarWidth = width - 2 * padding - this->scrollbarWidth;  // Adjust for vertical scrollbar
+        int scrollbarHeight = this->scrollbarWidth;
+        int scrollbarX = padding;
+        int scrollbarY = height - scrollbarHeight - padding / 2;
+
+        // Draw scrollbar background
+        buffer->fillRectangle(scrollbarX, scrollbarY, scrollbarWidth, scrollbarHeight, scrollbarColor);
+
+        // Calculate thumb position and size
+        float thumbRatio = static_cast<float>(visibleWidth) / maxLineWidth;
+        int thumbWidth = std::max(scrollbarMinLength, static_cast<int>(scrollbarWidth * thumbRatio));
+        int thumbX = scrollbarX + static_cast<int>((scrollbarWidth - thumbWidth) *
+                                                  (static_cast<float>(scrollX) / (maxLineWidth - visibleWidth)));
+
+        // Draw thumb
+        buffer->fillRectangle(thumbX, scrollbarY, thumbWidth, scrollbarHeight, scrollbarThumbColor);
     }
 };
