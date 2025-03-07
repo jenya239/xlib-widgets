@@ -40,7 +40,6 @@ private:
 
     int lineHeight = 20;
     int padding = 5;
-    bool focused = false;
 
     std::function<void(const std::filesystem::path&)> onFileSelected;
 
@@ -50,6 +49,9 @@ private:
 
     // For double-click detection
     Time lastClickTime = 0;
+
+    bool focused = false;
+    unsigned long focusedBorderColor = 0x0000FF; // Blue
 
 public:
     FileBrowser(int x, int y, int width, int height, const std::string& path = "", const std::string& widgetId = "")
@@ -71,6 +73,17 @@ public:
                 currentBuffer->freeXftColor(textColor);
             }
             textColor = nullptr;
+        }
+    }
+
+    bool hasFocus() const {
+        return focused;
+    }
+
+    void setFocus(bool focus) {
+        if (focused != focus) {
+            focused = focus;
+            markDirty();
         }
     }
 
@@ -146,24 +159,32 @@ public:
     void handleEvent(const Event& event) override {
         bool isInside = containsPoint(event.getX(), event.getY());
 
-        if (event.getType() == Event::Type::MouseDown && isInside) {
-            focused = true;
+        if (event.getType() == Event::Type::MouseDown) {
+            // Устанавливаем фокус, если клик внутри виджета
+            bool wasFocused = focused;
+            focused = isInside;
 
-            // Calculate which entry was clicked
-            int y = event.getY() - getY() - padding;
-            int clickedIndex = scrollOffset + (y / lineHeight);
-
-            if (clickedIndex >= 0 && clickedIndex < static_cast<int>(entries.size())) {
-                selectedIndex = clickedIndex;
-
-                // Handle double click to navigate or select file
-                if (event.getNativeEvent().xbutton.button == Button1 &&
-                    event.getNativeEvent().xbutton.time - lastClickTime < 300) {
-                    handleEntryActivation();
-                }
-
-                lastClickTime = event.getNativeEvent().xbutton.time;
+            if (focused != wasFocused) {
                 markDirty();
+            }
+
+            if (isInside) {
+                // Calculate which entry was clicked
+                int y = event.getY() - getY() - padding;
+                int clickedIndex = scrollOffset + (y / lineHeight);
+
+                if (clickedIndex >= 0 && clickedIndex < static_cast<int>(entries.size())) {
+                    selectedIndex = clickedIndex;
+
+                    // Handle double click to navigate or select file
+                    if (event.getNativeEvent().xbutton.button == Button1 &&
+                        event.getNativeEvent().xbutton.time - lastClickTime < 300) {
+                        handleEntryActivation();
+                    }
+
+                    lastClickTime = event.getNativeEvent().xbutton.time;
+                    markDirty();
+                }
             }
         }
         else if (event.getType() == Event::Type::KeyDown && focused) {
@@ -265,8 +286,9 @@ public:
         // Clear background
         currentBuffer->clear(backgroundColor);
 
-        // Draw border
-        currentBuffer->drawRectangle(0, 0, width - 1, height - 1, borderColor);
+        // Draw border with focus color if focused
+        unsigned long  borderColorToUse = focused ? focusedBorderColor : borderColor;
+        currentBuffer->drawRectangle(0, 0, width - 1, height - 1, borderColorToUse);
 
         // Initialize text color if needed
         if (!textColor) {

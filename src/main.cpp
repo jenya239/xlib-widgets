@@ -3,6 +3,8 @@
 #include <string>
 #include <X11/Xft/Xft.h>
 #include <X11/keysym.h>
+#include <fstream>   // For std::ifstream
+#include <iterator>  // For std::istreambuf_iterator
 
 // Import necessary modules
 import core.ioc_container;
@@ -73,10 +75,47 @@ int main() {
         fileBrowser->setVisible(true);
         fileBrowser->markDirty();
 
-        getFileSelectedSignal()->connect([logger](const auto& payload) {
+        getFileSelectedSignal()->connect([logger, textArea](const auto& payload) {
             if (!payload.isDirectory) {
 //              loadFile(payload.filePath);
                 logger->info("file selected " + payload.filePath);
+
+                // Try to load file content into text area if it's not too large
+                try {
+                    // Check file size first
+                    std::ifstream file(payload.filePath, std::ios::binary | std::ios::ate);
+                    if (!file.is_open()) {
+                        logger->error("Failed to open file: " + payload.filePath);
+                        return;
+                    }
+
+                    // Get file size
+                    const size_t fileSize = file.tellg();
+
+                    // Only load if file is smaller than 100KB
+                    const size_t maxFileSize = 100 * 1024;
+                    if (fileSize > maxFileSize) {
+                        logger->info("File too large to display: " + payload.filePath +
+                                    " (" + std::to_string(fileSize) + " bytes)");
+                        textArea->setText("File too large to display");
+                        return;
+                    }
+
+                    // Reset file pointer to beginning
+                    file.seekg(0, std::ios::beg);
+
+                    // Read the file content
+                    std::string content((std::istreambuf_iterator<char>(file)),
+                                        std::istreambuf_iterator<char>());
+
+                    // Set text area content
+                    textArea->setText(content);
+                    textArea->markDirty();
+                    logger->info("Loaded file content: " + std::to_string(content.size()) + " bytes");
+                } catch (const std::exception& e) {
+                    logger->error("Error loading file: " + std::string(e.what()));
+                    textArea->setText("Error loading file: " + std::string(e.what()));
+                }
             }
         });
 
