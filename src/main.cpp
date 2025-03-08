@@ -5,6 +5,8 @@
 #include <X11/keysym.h>
 #include <fstream>   // For std::ifstream
 #include <iterator>  // For std::istreambuf_iterator
+#include <bits/stl_algo.h>
+#include <bits/stl_vector.h>
 
 // Import necessary modules
 import core.ioc_container;
@@ -22,7 +24,22 @@ import ui.image;
 import ui.event;
 import ui.event_listener;
 
+bool isImageFile(const std::string& filePath) {
+    // Check file extension
+    std::string extension = filePath.substr(filePath.find_last_of(".") + 1);
+    std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+
+    // List of common image extensions
+    const std::vector<std::string> imageExtensions = {
+        "jpg", "jpeg", "png", "gif", "bmp", "tiff", "tif", "webp"
+    };
+
+    return std::find(imageExtensions.begin(), imageExtensions.end(), extension) != imageExtensions.end();
+}
+
 int main() {
+  	std::shared_ptr<Image> imageWidget;
+
     try {
         std::cout << "Starting application..." << std::endl;
 
@@ -76,61 +93,78 @@ int main() {
         fileBrowser->setVisible(true);
         fileBrowser->markDirty();
 
-        // Create an image widget
         try {
-    		auto image = std::make_shared<Image>("image1", 500, 500, 200, 150,
-      			"/home/jenya/Pictures/jenya239_greyhounds_nebula_starlight_dc31de9a-2bc0-474d-b783-f762dc48bd25.png");
-    		image->setVisible(true);
-    		image->markDirty();
-    		mainWindow->addChild(image);
-    		logger->info("Image widget added successfully");
-		} catch (const std::exception& e) {
-    		logger->error("Failed to create image widget: " + std::string(e.what()));
-		}
+        	imageWidget = std::make_shared<Image>("image1", 500, 500, 200, 150,
+            	"/home/jenya/Pictures/jenya239_greyhounds_nebula_starlight_dc31de9a-2bc0-474d-b783-f762dc48bd25.png");
+        	imageWidget->setVisible(true);
+        	imageWidget->markDirty();
+        	mainWindow->addChild(imageWidget);
+        	logger->info("Image widget added successfully");
+    	} catch (const std::exception& e) {
+        	logger->error("Failed to create image widget: " + std::string(e.what()));
+    	}
 
-        getFileSelectedSignal()->connect([logger, textArea](const auto& payload) {
-            if (!payload.isDirectory) {
-//              loadFile(payload.filePath);
-                logger->info("file selected " + payload.filePath);
+getFileSelectedSignal()->connect([logger, textArea, imageWidget](const auto& payload) {
+    // First check if it's a directory - if so, we don't need to do anything with the image or text area
+    if (payload.isDirectory) {
+        logger->info("Directory selected: " + payload.filePath);
+        return; // Early return for directories
+    }
 
-                // Try to load file content into text area if it's not too large
-                try {
-                    // Check file size first
-                    std::ifstream file(payload.filePath, std::ios::binary | std::ios::ate);
-                    if (!file.is_open()) {
-                        logger->error("Failed to open file: " + payload.filePath);
-                        return;
-                    }
+    // Now handle files
+    if (isImageFile(payload.filePath)) {
+        logger->info("Image file selected: " + payload.filePath);
 
-                    // Get file size
-                    const size_t fileSize = file.tellg();
-
-                    // Only load if file is smaller than 100KB
-                    const size_t maxFileSize = 100 * 1024;
-                    if (fileSize > maxFileSize) {
-                        logger->info("File too large to display: " + payload.filePath +
-                                    " (" + std::to_string(fileSize) + " bytes)");
-                        textArea->setText("File too large to display");
-                        return;
-                    }
-
-                    // Reset file pointer to beginning
-                    file.seekg(0, std::ios::beg);
-
-                    // Read the file content
-                    std::string content((std::istreambuf_iterator<char>(file)),
-                                        std::istreambuf_iterator<char>());
-
-                    // Set text area content
-                    textArea->setText(content);
-                    textArea->markDirty();
-                    logger->info("Loaded file content: " + std::to_string(content.size()) + " bytes");
-                } catch (const std::exception& e) {
-                    logger->error("Error loading file: " + std::string(e.what()));
-                    textArea->setText("Error loading file: " + std::string(e.what()));
-                }
+        // Update the image widget with the new image
+        if (imageWidget) {
+            try {
+                imageWidget->setImage(payload.filePath);
+                logger->info("Image updated successfully");
+            } catch (const std::exception& e) {
+                logger->error("Failed to update image: " + std::string(e.what()));
             }
-        });
+        }
+    } else {
+        logger->info("Text file selected: " + payload.filePath);
+
+        // Try to load file content into text area if it's not too large
+        try {
+            // Check file size first
+            std::ifstream file(payload.filePath, std::ios::binary | std::ios::ate);
+            if (!file.is_open()) {
+                logger->error("Failed to open file: " + payload.filePath);
+                return;
+            }
+
+            // Get file size
+            const size_t fileSize = file.tellg();
+
+            // Only load if file is smaller than 100KB
+            const size_t maxFileSize = 100 * 1024;
+            if (fileSize > maxFileSize) {
+                logger->info("File too large to display: " + payload.filePath +
+                            " (" + std::to_string(fileSize) + " bytes)");
+                textArea->setText("File too large to display");
+                return;
+            }
+
+            // Reset file pointer to beginning
+            file.seekg(0, std::ios::beg);
+
+            // Read the file content
+            std::string content((std::istreambuf_iterator<char>(file)),
+                            std::istreambuf_iterator<char>());
+
+            // Set text area content
+            textArea->setText(content);
+            textArea->markDirty();
+            logger->info("Loaded file content: " + std::to_string(content.size()) + " bytes");
+        } catch (const std::exception& e) {
+            logger->error("Error loading file: " + std::string(e.what()));
+            textArea->setText("Error loading file: " + std::string(e.what()));
+        }
+    }
+});
 
         // Load and set font for the text field
         if (displayService) {

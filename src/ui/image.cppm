@@ -153,13 +153,19 @@ public:
             // Используем Imlib2 для масштабирования изображения
             logger->info("Using Imlib2 for image scaling");
 
-            // Сохраняем текущий контекст Imlib
+            // Use RAII pattern for Imlib context management
             Imlib_Context prev_context = imlib_context_get();
+//            imlib_context_push();
+            auto contextGuard = [prev_context]() {
+                imlib_context_free(prev_context);
+//                imlib_context_pop();
+            };
 
-            // Загружаем изображение снова для масштабирования
+            // Load the image
             Imlib_Image img = imlib_load_image(imagePath.c_str());
             if (!img) {
                 logger->error("Failed to load image for scaling");
+                contextGuard();  // Restore context before returning
                 return;
             }
 
@@ -221,6 +227,7 @@ public:
 
             // Восстанавливаем предыдущий контекст Imlib
             imlib_context_free(prev_context);
+//            imlib_context_pop();
 
             logger->info("Image scaled and rendered to buffer successfully");
         } catch (const std::exception& e) {
@@ -228,5 +235,31 @@ public:
         } catch (...) {
             logger->error("Unknown exception during painting");
         }
+    }
+
+    void setImage(const std::string& newImagePath) {
+        logger->info("Changing image to: " + newImagePath);
+
+        // Check if the new file exists
+        std::ifstream file(newImagePath);
+        if (!file.good()) {
+            logger->error("New image file does not exist or cannot be accessed: " + newImagePath);
+            return;
+        }
+
+        // Clean up old resources if needed
+        if (pixmap && currentDisplay) {
+            XFreePixmap(currentDisplay, pixmap);
+            pixmap = 0;
+        }
+
+        // Set the new path
+        imagePath = newImagePath;
+        imageLoaded = false;
+
+        // Force reload and repaint
+        markDirty();
+
+        logger->info("Image changed successfully, will be loaded on next paint");
     }
 };
