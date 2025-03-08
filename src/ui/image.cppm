@@ -6,6 +6,7 @@ module;
 #include <X11/Xutil.h>
 #include <Imlib2.h>  // Для работы с изображениями
 #include <fstream>
+#include <algorithm>
 
 export module ui.image;
 
@@ -118,7 +119,6 @@ public:
         }
     }
 
-    // Переопределяем метод paintToBuffer для отрисовки изображения
     void paintToBuffer(Display* display) override {
         logger->info("paintToBuffer called");
 
@@ -150,31 +150,79 @@ public:
         logger->info("Render buffer obtained");
 
         try {
-            // Создаем временный GC для копирования изображения
-            logger->info("Creating temporary GC");
-            GC tempGC = XCreateGC(display, buffer->getPixmap(), 0, nullptr);
-            if (!tempGC) {
-                logger->error("Failed to create GC");
+            // Используем Imlib2 для масштабирования изображения
+            logger->info("Using Imlib2 for image scaling");
+
+            // Сохраняем текущий контекст Imlib
+            Imlib_Context prev_context = imlib_context_get();
+
+            // Загружаем изображение снова для масштабирования
+            Imlib_Image img = imlib_load_image(imagePath.c_str());
+            if (!img) {
+                logger->error("Failed to load image for scaling");
                 return;
             }
 
-            // Копируем изображение из pixmap в буфер
-            logger->info("Copying image from pixmap to buffer");
-            XCopyArea(
-                display,
-                pixmap,
-                buffer->getPixmap(),
-                tempGC,
-                0, 0,                                // Исходные координаты
-                std::min(imageWidth, (int)getWidth()),  // Ширина для копирования
-                std::min(imageHeight, (int)getHeight()), // Высота для копирования
-                0, 0                                 // Целевые координаты в буфере
-            );
-            logger->info("Image copied to buffer successfully");
+            imlib_context_set_image(img);
 
-            // Освобождаем временный GC
-            logger->info("Freeing temporary GC");
-            XFreeGC(display, tempGC);
+            // Вычисляем параметры для режима "cover"
+            double widgetRatio = (double)getWidth() / getHeight();
+            double imageRatio = (double)imageWidth / imageHeight;
+
+            int targetWidth = getWidth();
+            int targetHeight = getHeight();
+
+            // Масштабируем изображение с сохранением пропорций
+            Imlib_Image scaled_img;
+            if (imageRatio > widgetRatio) {
+                // Изображение шире, чем виджет (относительно)
+                int newWidth = (int)(imageHeight * widgetRatio);
+                int offsetX = (imageWidth - newWidth) / 2;
+
+                // Обрезаем и масштабируем
+                scaled_img = imlib_create_cropped_scaled_image(
+                    offsetX, 0, newWidth, imageHeight,
+                    targetWidth, targetHeight
+                );
+            } else {
+                // Изображение выше, чем виджет (относительно)
+                int newHeight = (int)(imageWidth / widgetRatio);
+                int offsetY = (imageHeight - newHeight) / 2;
+
+                // Обрезаем и масштабируем
+                scaled_img = imlib_create_cropped_scaled_image(
+                    0, offsetY, imageWidth, newHeight,
+                    targetWidth, targetHeight
+                );
+            }
+
+            // Освобождаем исходное изображение
+            imlib_free_image();
+
+            if (!scaled_img) {
+                logger->error("Failed to scale image");
+                return;
+            }
+
+            // Устанавливаем масштабированное изображение как текущее
+            imlib_context_set_image(scaled_img);
+
+            // Настраиваем контекст для рендеринга
+            imlib_context_set_display(display);
+            imlib_context_set_visual(DefaultVisual(display, DefaultScreen(display)));
+            imlib_context_set_colormap(DefaultColormap(display, DefaultScreen(display)));
+            imlib_context_set_drawable(buffer->getPixmap());
+
+            // Рендерим масштабированное изображение прямо в буфер виджета
+            imlib_render_image_on_drawable(0, 0);
+
+            // Освобождаем масштабированное изображение
+            imlib_free_image();
+
+            // Восстанавливаем предыдущий контекст Imlib
+            imlib_context_free(prev_context);
+
+            logger->info("Image scaled and rendered to buffer successfully");
         } catch (const std::exception& e) {
             logger->error("Exception during painting: " + std::string(e.what()));
         } catch (...) {

@@ -120,7 +120,6 @@ public:
         setWindow(window);
         // Only render if dirty
         if (isDirty) {
-            std::cout << "DEBUG: Widget::render - widget is dirty, updating buffer" << std::endl;
             ensureBuffer(display, window);
 
             // Clear the buffer with the default background color
