@@ -290,4 +290,21 @@ public:
     
     unsigned int getWidth() const { return width; }
     unsigned int getHeight() const { return height; }
+
+    // Draw an XImage to the buffer
+    void drawImage(XImage* image, int x, int y) {
+        if (!image || !image->data) return;
+
+        // Create a GC for the pixmap
+        GC gc = XCreateGC(display, pixmap, 0, nullptr);
+
+        // Put the image on the pixmap
+        XPutImage(display, pixmap, gc, image,
+                 0, 0,    // Source x, y
+                 x, y,    // Destination x, y
+                 image->width, image->height);
+
+        // Free the GC
+        XFreeGC(display, gc);
+    }
 };

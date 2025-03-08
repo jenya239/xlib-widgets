@@ -2,7 +2,7 @@
 
 ## Краткая статистика
 
-- Всего файлов: 14
+- Всего файлов: 18
 - Типы файлов: .cppm, .cpp
 
 ## Структура директорий
@@ -17,13 +17,18 @@ src/services/
   └── logger_service.cppm
   └── render_service.cppm
   └── xdisplay_service.cppm
+src/state/
+  └── app_signals.cppm
+  └── signal.cppm
 src/ui/
   └── application.cppm
   └── application_window.cppm
   └── button.cppm
   └── event.cppm
   └── event_listener.cppm
+  └── file_browser.cppm
   └── render_buffer.cppm
+  └── text_area.cppm
   └── text_field.cppm
   └── widget.cppm
 ```
@@ -114,6 +119,8 @@ public:
 #include <string>
 #include <X11/Xft/Xft.h>
 #include <X11/keysym.h>
+#include <fstream>   // For std::ifstream
+#include <iterator>  // For std::istreambuf_iterator
 
 // Import necessary modules
 import core.ioc_container;
@@ -121,9 +128,12 @@ import services.xdisplay_service;
 import services.event_loop_service;
 import services.logger_service;
 import services.render_service;
+import state.app_signals;
 import ui.application;
 import ui.button;
 import ui.text_field;
+import ui.text_area;
+import ui.file_browser;
 import ui.event;
 import ui.event_listener;
 
@@ -135,7 +145,7 @@ int main() {
         auto app = std::make_shared<Application>();
 
         // Create main window
-        if (!app->createMainWindow("Simple Test Application", 600, 400)) {
+        if (!app->createMainWindow("file browser", 900, 500)) {
             std::cerr << "Failed to create main window" << std::endl;
             return 1;
         }
@@ -171,16 +181,72 @@ int main() {
         // Make sure the text field needs repainting
         textField->markDirty();
 
+        // Create a text area for multi-line text input
+        auto textArea = std::make_shared<TextArea>(50, 170, 250, 150, "Enter multi-line text here...");
+        textArea->setVisible(true);
+        textArea->markDirty();
+
+        // Create a file browser
+        auto fileBrowser = std::make_shared<FileBrowser>(320, 50, 450, 370, "/home");
+        fileBrowser->setVisible(true);
+        fileBrowser->markDirty();
+
+        getFileSelectedSignal()->connect([logger, textArea](const auto& payload) {
+            if (!payload.isDirectory) {
+//              loadFile(payload.filePath);
+                logger->info("file selected " + payload.filePath);
+
+                // Try to load file content into text area if it's not too large
+                try {
+                    // Check file size first
+                    std::ifstream file(payload.filePath, std::ios::binary | std::ios::ate);
+                    if (!file.is_open()) {
+                        logger->error("Failed to open file: " + payload.filePath);
+                        return;
+                    }
+
+                    // Get file size
+                    const size_t fileSize = file.tellg();
+
+                    // Only load if file is smaller than 100KB
+                    const size_t maxFileSize = 100 * 1024;
+                    if (fileSize > maxFileSize) {
+                        logger->info("File too large to display: " + payload.filePath +
+                                    " (" + std::to_string(fileSize) + " bytes)");
+                        textArea->setText("File too large to display");
+                        return;
+                    }
+
+                    // Reset file pointer to beginning
+                    file.seekg(0, std::ios::beg);
+
+                    // Read the file content
+                    std::string content((std::istreambuf_iterator<char>(file)),
+                                        std::istreambuf_iterator<char>());
+
+                    // Set text area content
+                    textArea->setText(content);
+                    textArea->markDirty();
+                    logger->info("Loaded file content: " + std::to_string(content.size()) + " bytes");
+                } catch (const std::exception& e) {
+                    logger->error("Error loading file: " + std::string(e.what()));
+                    textArea->setText("Error loading file: " + std::string(e.what()));
+                }
+            }
+        });
+
         // Load and set font for the text field
         if (displayService) {
             XftFont* font = XftFontOpenName(
                 displayService,
                 DefaultScreen(displayService),
-                "Sans-12"
+                "Monospace-10"
             );
 
             if (font) {
                 textField->setFont(font);
+                textArea->setFont(font);
+                fileBrowser->setFont(font);
                 logger->info("Font set for TextField");
             } else {
                 logger->error("Failed to load font for TextField");
@@ -190,6 +256,8 @@ int main() {
         // Add widgets to main window
         mainWindow->addChild(button);
         mainWindow->addChild(textField);
+        mainWindow->addChild(textArea);
+        mainWindow->addChild(fileBrowser);
 
         // Create a custom event listener for text field focus
         class TextFieldEventListener : public EventListener {
@@ -201,12 +269,12 @@ int main() {
             TextFieldEventListener(std::shared_ptr<TextField> tf, std::shared_ptr<LoggerService> log)
                 : textField(tf), logger(log) {}
 
-            bool handleEvent(const Event& event) override {
+            void handleEvent(const Event& event) override {
                 // Get event type using the appropriate method
                 Event::Type eventType = event.getType();
 
                 // Handle mouse button press for focus management
-                if (eventType == Event::BUTTON_PRESS) {
+                if (eventType == Event::Type::MouseDown) {
                     // Get mouse coordinates from the event
                     int x = event.getX();
                     int y = event.getY();
@@ -216,29 +284,26 @@ int main() {
                         y >= textField->getY() && y <= textField->getY() + textField->getHeight()) {
                         textField->setFocus(true);
                         logger->info("TextField focused");
-                        return true;
                     } else if (textField->isFocused()) {
                         textField->setFocus(false);
                         logger->info("TextField lost focus");
                     }
                 }
                 // Handle key press events when text field is focused
-                else if (eventType == Event::KEY_PRESS && textField->isFocused()) {
+                else if (eventType == Event::Type::KeyDown && textField->isFocused()) {
                     // Get key information from the event
-                    char key = event.getKeyChar();
-                    textField->addCharacter(key);
+                    char key = event.getKeycode();
+//                    textField->handleKeyInput(key);
                     logger->info("Key pressed in TextField: " + std::string(1, key));
-                    return true;
                 }
-                return false;
             }
         };
 
-        // Create the event listener
-        auto textFieldListener = std::make_shared<TextFieldEventListener>(textField, logger);
-
-        // Register the event listener with the main window
-        mainWindow->addEventHandler(textFieldListener);
+//        // Create the event listener
+//        auto textFieldListener = std::make_shared<TextFieldEventListener>(textField, logger);
+//
+//        // Register the event listener with the main window
+//        mainWindow->addEventListener(textFieldListener);
 
         // Setup event handling
         app->setupEventHandling();
@@ -570,6 +635,169 @@ public:
 
 ---
 
+### Файл: `src/state/app_signals.cppm`
+
+```cpp
+module;
+#include <string>
+#include <vector>
+#include <memory>
+
+export module state.app_signals;
+
+import state.signal;
+
+// Типы данных для сигналов
+export struct FileSelectedPayload {
+	std::string filePath;
+	std::string fileName;
+	bool isDirectory;
+};
+
+export struct TextChangedPayload {
+	std::string text;
+	std::string widgetId;
+};
+
+export struct ButtonClickedPayload {
+	std::string buttonId;
+};
+
+// Функции-обёртки для получения сигналов (синглтоны)
+export std::shared_ptr<Signal<FileSelectedPayload>> getFileSelectedSignal() {
+	static std::shared_ptr<Signal<FileSelectedPayload>> signal =
+			std::make_shared<Signal<FileSelectedPayload>>();
+	static bool initialized = false;
+	if (!initialized) {
+		SignalService::registerSignal(signal);
+		initialized = true;
+	}
+	return signal;
+}
+
+export std::shared_ptr<Signal<TextChangedPayload>> getTextChangedSignal() {
+	static std::shared_ptr<Signal<TextChangedPayload>> signal =
+			std::make_shared<Signal<TextChangedPayload>>();
+	static bool initialized = false;
+	if (!initialized) {
+		SignalService::registerSignal(signal);
+		initialized = true;
+	}
+	return signal;
+}
+
+export std::shared_ptr<Signal<ButtonClickedPayload>> getButtonClickedSignal() {
+	static std::shared_ptr<Signal<ButtonClickedPayload>> signal =
+			std::make_shared<Signal<ButtonClickedPayload>>();
+	static bool initialized = false;
+	if (!initialized) {
+		SignalService::registerSignal(signal);
+		initialized = true;
+	}
+	return signal;
+}
+```
+
+---
+
+### Файл: `src/state/signal.cppm`
+
+```cpp
+module;
+#include <functional>
+#include <vector>
+#include <memory>
+#include <unordered_map>
+#include <any>
+
+export module state.signal;
+
+// Уникальный идентификатор сигнала
+export class SignalId {
+private:
+    // Приватный конструктор гарантирует, что каждый экземпляр уникален
+    SignalId() = default;
+
+public:
+    // Фабричный метод для создания уникальных идентификаторов
+    static std::shared_ptr<SignalId> create() {
+        return std::shared_ptr<SignalId>(new SignalId());
+    }
+
+    // Запрещаем копирование и перемещение
+    SignalId(const SignalId&) = delete;
+    SignalId& operator=(const SignalId&) = delete;
+    SignalId(SignalId&&) = delete;
+    SignalId& operator=(SignalId&&) = delete;
+};
+
+// Класс для создания и управления сигналами
+export template<typename PayloadType>
+class Signal {
+private:
+    using SignalHandler = std::function<void(const PayloadType&)>;
+    std::vector<SignalHandler> handlers;
+    std::shared_ptr<SignalId> id;
+
+public:
+    Signal() : id(SignalId::create()) {}
+
+    // Получить уникальный идентификатор сигнала
+    std::shared_ptr<SignalId> getId() const {
+        return id;
+    }
+
+    // Отправить сигнал с данными
+    void emit(const PayloadType& payload) const {
+        for (const auto& handler : handlers) {
+            handler(payload);
+        }
+    }
+
+    // Подписаться на сигнал
+    template<typename Handler>
+    void connect(Handler&& handler) {
+        handlers.push_back(std::forward<Handler>(handler));
+    }
+};
+
+// Сервис для управления сигналами
+export class SignalService {
+private:
+    // Хранилище для сигналов по их идентификаторам
+    std::unordered_map<std::shared_ptr<SignalId>, std::any> signals;
+
+    // Синглтон
+    static SignalService& getInstance() {
+        static SignalService instance;
+        return instance;
+    }
+
+    SignalService() = default;
+
+public:
+    // Регистрация сигнала в сервисе
+    template<typename PayloadType>
+    static void registerSignal(const std::shared_ptr<Signal<PayloadType>>& signal) {
+        auto& instance = getInstance();
+        instance.signals[signal->getId()] = signal;
+    }
+
+    // Получить сигнал по идентификатору
+    template<typename PayloadType>
+    static std::shared_ptr<Signal<PayloadType>> getSignal(const std::shared_ptr<SignalId>& id) {
+        auto& instance = getInstance();
+        auto it = instance.signals.find(id);
+        if (it != instance.signals.end()) {
+            return std::any_cast<std::shared_ptr<Signal<PayloadType>>>(it->second);
+        }
+        return nullptr;
+    }
+};
+```
+
+---
+
 ### Файл: `src/ui/application.cppm`
 
 ```cpp
@@ -712,7 +940,7 @@ private:
     Display* display = nullptr;
     Window xWindow = 0;  // Use X11's Window type
     std::string title = "Application Window";
-    int width = 800;
+    int width = 1200;
     int height = 600;
 
 public:
@@ -755,7 +983,7 @@ public:
         // Выбираем события, которые хотим получать
         // В методе setupEventHandling или при создании окна
         XSelectInput(display, xWindow, ExposureMask | ButtonPressMask | ButtonReleaseMask |
-                              PointerMotionMask | EnterWindowMask | LeaveWindowMask);
+                              PointerMotionMask | EnterWindowMask | LeaveWindowMask | KeyPressMask | KeyReleaseMask);
 
         // Отображаем окно
         XMapWindow(display, xWindow);
@@ -1225,6 +1453,37 @@ public:
     unsigned int getButton() const { return button; }
     unsigned int getKeycode() const { return keycode; }
     const XEvent& getNativeEvent() const { return nativeEvent; }
+
+    // Метод для получения строкового представления типа события
+    std::string getName() const {
+        switch (type) {
+            case Type::MouseMove:
+                return "MouseMove";
+            case Type::MouseDown:
+                return "MouseDown";
+            case Type::MouseUp:
+                return "MouseUp";
+            case Type::MouseEnter:
+                return "MouseEnter";
+            case Type::MouseLeave:
+                return "MouseLeave";
+            case Type::KeyDown:
+                return "KeyDown";
+            case Type::KeyUp:
+                return "KeyUp";
+            case Type::KeyPressEvent:
+                return "KeyPressEvent";
+            case Type::PaintEvent:
+                return "PaintEvent";
+            case Type::WindowResize:
+                return "WindowResize";
+            case Type::WindowClose:
+                return "WindowClose";
+            case Type::Unknown:
+                default:
+                    return "Unknown";
+        }
+    }
 };
 ```
 
@@ -1243,6 +1502,369 @@ export class EventListener {
 public:
     virtual ~EventListener() = default;
     virtual void handleEvent(const Event& event) = 0;
+};
+```
+
+---
+
+### Файл: `src/ui/file_browser.cppm`
+
+```cpp
+module;
+#include <X11/Xlib.h>
+#include <X11/keysym.h>
+#include <X11/Xft/Xft.h>
+#include <string>
+#include <vector>
+#include <filesystem>
+#include <algorithm>
+#include <iostream>
+#include <functional>
+
+export module ui.file_browser;
+
+import state.app_signals;
+import ui.widget;
+import ui.render_buffer;
+import ui.event;
+
+export class FileBrowser : public Widget {
+private:
+    struct FileEntry {
+        std::string name;
+        bool isDirectory;
+        bool isParentDir;
+
+        FileEntry(const std::string& name, bool isDir, bool isParent = false)
+            : name(name), isDirectory(isDir), isParentDir(isParent) {}
+    };
+
+    std::filesystem::path currentPath;
+    std::vector<FileEntry> entries;
+    int selectedIndex = 0;
+    int scrollOffset = 0;
+
+    XftFont* font = nullptr;
+    XftColor* textColor = nullptr;
+
+    unsigned long backgroundColor = 0xFFFFFF;  // White
+    unsigned long borderColor = 0x000000;      // Black
+
+    int lineHeight = 20;
+    int padding = 5;
+
+    std::function<void(const std::filesystem::path&)> onFileSelected;
+
+    // Scrollbar constants
+    const int scrollbarWidth = 10;
+    const int scrollbarMinLength = 20;
+
+    // For double-click detection
+    Time lastClickTime = 0;
+
+    bool focused = false;
+    unsigned long focusedBorderColor = 0x0000FF; // Blue
+
+public:
+    FileBrowser(int x, int y, int width, int height, const std::string& path = "", const std::string& widgetId = "")
+        : Widget(widgetId), currentPath(path.empty() ? std::filesystem::current_path() : std::filesystem::path(path)) {
+        // Set position and size manually
+        setX(x);
+        setY(y);
+        setWidth(width);
+        setHeight(height);
+
+        // Initialize file browser
+        refreshEntries();
+    }
+
+    ~FileBrowser() {
+        if (textColor) {
+            RenderBuffer* currentBuffer = getBuffer();
+            if (currentBuffer) {
+                currentBuffer->freeXftColor(textColor);
+            }
+            textColor = nullptr;
+        }
+    }
+
+    bool hasFocus() const {
+        return focused;
+    }
+
+    void setFocus(bool focus) {
+        if (focused != focus) {
+            focused = focus;
+            markDirty();
+        }
+    }
+
+    void setFont(XftFont* newFont) {
+        font = newFont;
+        if (font) {
+            lineHeight = font->ascent + font->descent + 2;
+        }
+    }
+
+    void setPath(const std::filesystem::path& path) {
+        if (std::filesystem::exists(path) && std::filesystem::is_directory(path)) {
+            currentPath = path;
+            refreshEntries();
+            selectedIndex = 0;
+            scrollOffset = 0;
+            markDirty();
+        }
+    }
+
+    std::filesystem::path getCurrentPath() const {
+        return currentPath;
+    }
+
+    void setOnFileSelected(std::function<void(const std::filesystem::path&)> callback) {
+        onFileSelected = callback;
+    }
+
+    void refreshEntries() {
+        entries.clear();
+
+        // Add parent directory entry if not at root
+        if (currentPath.has_parent_path() && currentPath != currentPath.parent_path()) {
+            entries.emplace_back("..", true, true);
+        }
+
+        try {
+            // Add directories first
+            for (const auto& entry : std::filesystem::directory_iterator(currentPath)) {
+                if (entry.is_directory()) {
+                    entries.emplace_back(entry.path().filename().string(), true);
+                }
+            }
+
+            // Then add files
+            for (const auto& entry : std::filesystem::directory_iterator(currentPath)) {
+                if (!entry.is_directory()) {
+                    entries.emplace_back(entry.path().filename().string(), false);
+                }
+            }
+
+            // Sort entries alphabetically within their groups
+            auto dirEnd = std::partition(entries.begin(), entries.end(),
+                [](const FileEntry& e) { return e.isDirectory; });
+
+            std::sort(entries.begin(), dirEnd,
+                [](const FileEntry& a, const FileEntry& b) {
+                    if (a.isParentDir) return true;
+                    if (b.isParentDir) return false;
+                    return a.name < b.name;
+                });
+
+            std::sort(dirEnd, entries.end(),
+                [](const FileEntry& a, const FileEntry& b) {
+                    return a.name < b.name;
+                });
+        }
+        catch (const std::filesystem::filesystem_error& e) {
+            std::cerr << "Error accessing directory: " << e.what() << std::endl;
+        }
+    }
+
+    void handleEvent(const Event& event) override {
+        bool isInside = containsPoint(event.getX(), event.getY());
+
+        if (event.getType() == Event::Type::MouseDown) {
+            // Устанавливаем фокус, если клик внутри виджета
+            bool wasFocused = focused;
+            focused = isInside;
+
+            if (focused != wasFocused) {
+                markDirty();
+            }
+
+            if (isInside) {
+                // Calculate which entry was clicked
+                int y = event.getY() - getY() - padding;
+                int clickedIndex = scrollOffset + (y / lineHeight);
+
+                if (clickedIndex >= 0 && clickedIndex < static_cast<int>(entries.size())) {
+                    selectedIndex = clickedIndex;
+
+                    // Handle double click to navigate or select file
+                    if (event.getNativeEvent().xbutton.button == Button1 &&
+                        event.getNativeEvent().xbutton.time - lastClickTime < 300) {
+                        handleEntryActivation();
+                    }
+
+                    lastClickTime = event.getNativeEvent().xbutton.time;
+                    markDirty();
+                }
+            }
+        }
+        else if (event.getType() == Event::Type::KeyDown && focused) {
+            XKeyEvent keyEvent = event.getNativeEvent().xkey;
+            KeySym keysym = XLookupKeysym(&keyEvent, 0);
+
+            if (keysym == XK_Up) {
+                if (selectedIndex > 0) {
+                    selectedIndex--;
+                    ensureSelectedVisible();
+                    markDirty();
+                }
+            }
+            else if (keysym == XK_Down) {
+                if (selectedIndex < static_cast<int>(entries.size()) - 1) {
+                    selectedIndex++;
+                    ensureSelectedVisible();
+                    markDirty();
+                }
+            }
+            else if (keysym == XK_Page_Up) {
+                int visibleLines = (getHeight() - 2 * padding - lineHeight) / lineHeight;
+                selectedIndex = std::max(0, selectedIndex - visibleLines);
+                ensureSelectedVisible();
+                markDirty();
+            }
+            else if (keysym == XK_Page_Down) {
+                int visibleLines = (getHeight() - 2 * padding - lineHeight) / lineHeight;
+                selectedIndex = std::min(static_cast<int>(entries.size()) - 1, selectedIndex + visibleLines);
+                ensureSelectedVisible();
+                markDirty();
+            }
+            else if (keysym == XK_Return || keysym == XK_KP_Enter) {
+                handleEntryActivation();
+            }
+            else if (keysym == XK_BackSpace) {
+                // Go up one directory
+                if (currentPath.has_parent_path() && currentPath != currentPath.parent_path()) {
+                    setPath(currentPath.parent_path());
+                }
+            }
+        }
+
+        Widget::handleEvent(event);
+    }
+
+    void handleEntryActivation() {
+        if (selectedIndex >= 0 && selectedIndex < static_cast<int>(entries.size())) {
+            const auto& entry = entries[selectedIndex];
+
+            const auto fullPath = currentPath / entry.name;
+
+            if (entry.isDirectory) {
+                // Navigate to directory
+                if (entry.isParentDir) {
+                    setPath(currentPath.parent_path());
+                } else {
+                    setPath(fullPath);
+                }
+            } else if (onFileSelected) {
+                onFileSelected(fullPath);
+            }
+
+            getFileSelectedSignal()->emit({
+                .filePath = fullPath,
+                .fileName = entry.name,
+                .isDirectory = entry.isDirectory
+            });
+        }
+    }
+
+    void ensureSelectedVisible() {
+        int headerHeight = padding + lineHeight + padding/2 + padding; // Path + separator
+        int visibleLines = (getHeight() - headerHeight - padding) / lineHeight;
+
+        // If selected item is above the visible area
+        if (selectedIndex < scrollOffset) {
+            scrollOffset = selectedIndex;
+        }
+        // If selected item is below the visible area
+        else if (selectedIndex >= scrollOffset + visibleLines) {
+            scrollOffset = selectedIndex - visibleLines + 1;
+        }
+
+        // Ensure scroll offset is valid
+        if (scrollOffset < 0) scrollOffset = 0;
+        int maxScroll = std::max(0, static_cast<int>(entries.size()) - visibleLines);
+        if (scrollOffset > maxScroll) scrollOffset = maxScroll;
+    }
+
+    void paintToBuffer(Display* display) override {
+        ensureBuffer(display, getWindow());
+        RenderBuffer* currentBuffer = getBuffer();
+        if (!currentBuffer || !font) return;
+
+        int width = getWidth();
+        int height = getHeight();
+
+        // Clear background
+        currentBuffer->clear(backgroundColor);
+
+        // Draw border with focus color if focused
+        unsigned long  borderColorToUse = focused ? focusedBorderColor : borderColor;
+        currentBuffer->drawRectangle(0, 0, width - 1, height - 1, borderColorToUse);
+
+        // Initialize text color if needed
+        if (!textColor) {
+            textColor = currentBuffer->createXftColor(0, 0, 0);  // Black
+        }
+
+        // Draw current path
+        std::string pathStr = currentPath.string();
+        int pathY = padding + font->ascent;
+        currentBuffer->drawText(padding, pathY, pathStr, font, textColor);
+
+        // Draw separator line
+        int separatorY = padding + lineHeight + padding/2;
+        currentBuffer->drawLine(padding, separatorY, width - padding, separatorY, borderColor);
+
+        // Draw file entries
+        int startY = separatorY + padding;
+        int visibleLines = (height - startY - padding) / lineHeight;
+
+        // Ensure scroll offset is valid
+        if (scrollOffset > static_cast<int>(entries.size()) - visibleLines) {
+            scrollOffset = std::max(0, static_cast<int>(entries.size()) - visibleLines);
+        }
+
+        for (int i = 0; i < visibleLines && i + scrollOffset < static_cast<int>(entries.size()); i++) {
+            int entryIndex = i + scrollOffset;
+            const auto& entry = entries[entryIndex];
+
+            int entryY = startY + i * lineHeight;
+
+            // Draw selection highlight
+            if (entryIndex == selectedIndex) {
+                currentBuffer->fillRectangle(padding, entryY, width - 2 * padding, lineHeight, 0xADD8E6);
+            }
+
+            // Draw entry icon/prefix
+            std::string prefix = entry.isDirectory ? "[DIR] " : "     ";
+            if (entry.isParentDir) prefix = "[..] ";
+
+            // Draw entry text
+            int textY = entryY + font->ascent;
+            currentBuffer->drawText(padding * 2, textY, prefix + entry.name, font, textColor);
+        }
+
+        // Draw scrollbar if needed
+        if (entries.size() > visibleLines) {
+            int scrollbarX = width - scrollbarWidth - 1;
+            int scrollbarY = startY;
+            int scrollbarHeight = height - startY - padding;
+
+            // Draw scrollbar background
+            currentBuffer->fillRectangle(scrollbarX, scrollbarY, scrollbarWidth, scrollbarHeight, 0xDDDDDD);
+
+            // Calculate thumb position and size
+            float thumbRatio = static_cast<float>(visibleLines) / entries.size();
+            int thumbHeight = std::max(static_cast<int>(scrollbarHeight * thumbRatio), scrollbarMinLength);
+            int thumbY = scrollbarY + static_cast<int>((scrollbarHeight - thumbHeight) *
+                                                     (static_cast<float>(scrollOffset) /
+                                                      std::max(1, static_cast<int>(entries.size() - visibleLines))));
+
+            // Draw thumb
+            currentBuffer->fillRectangle(scrollbarX, thumbY, scrollbarWidth, thumbHeight, 0x888888);
+        }
+    }
 };
 ```
 
@@ -1548,6 +2170,982 @@ public:
 
 ---
 
+### Файл: `src/ui/text_area.cppm`
+
+```cpp
+module;
+#include <X11/Xlib.h>
+#include <X11/keysym.h>
+#include <X11/Xft/Xft.h>
+#include <string>
+#include <vector>
+#include <memory>
+#include <iostream>
+
+export module ui.text_area;
+
+import ui.widget;
+import ui.render_buffer;
+import ui.event;
+
+export class TextArea : public Widget {
+private:
+    std::vector<std::string> lines;
+    std::string placeholder;
+    XftFont* font = nullptr;
+    XftColor* textColor = nullptr;
+    XftColor* placeholderColor = nullptr;
+
+    unsigned long backgroundColor = 0xFFFFFF;  // White
+    unsigned long borderColor = 0x000000;      // Black
+    unsigned long focusedBorderColor = 0x0000FF; // Blue
+
+    int cursorRow = 0;
+    int cursorCol = 0;
+    bool focused = false;
+    int padding = 5;  // Padding inside the text area
+
+    int scrollX = 0;  // Horizontal scroll position
+    int scrollY = 0;  // Vertical scroll position
+    int lineHeight = 0; // Will be calculated based on font
+
+    bool hasSelection = false;
+    int selectionStartRow = 0;
+    int selectionStartCol = 0;
+    int selectionEndRow = 0;
+    int selectionEndCol = 0;
+    unsigned long selectionColor = 0xADD8E6; // Light blue
+
+    std::string clipboardText;
+
+    // Constants for scrollbar
+    static constexpr int scrollbarWidth = 10;
+    static constexpr int scrollbarMinLength = 20;
+    unsigned long scrollbarColor = 0x888888;
+    unsigned long scrollbarThumbColor = 0x444444;
+
+public:
+    TextArea(int x, int y, int width, int height, const std::string& placeholder = "")
+        : Widget(placeholder) {  // Use placeholder as the widget ID or use an empty string
+        // Set position and size manually
+        setX(x);
+        setY(y);
+        setWidth(width);
+        setHeight(height);
+        this->placeholder = placeholder;
+
+        // Initialize with one empty line
+        lines.push_back("");
+    }
+
+    ~TextArea() {
+        RenderBuffer* currentBuffer = getBuffer();
+        if (currentBuffer) {
+            if (textColor) {
+                currentBuffer->freeXftColor(textColor);
+                textColor = nullptr;
+            }
+            if (placeholderColor) {
+                currentBuffer->freeXftColor(placeholderColor);
+                placeholderColor = nullptr;
+            }
+        }
+        // Font should be loaded and freed by the application
+    }
+
+    void setText(const std::string& newText) {
+        // Split the text into lines
+        lines.clear();
+        size_t start = 0;
+        size_t end = newText.find('\n');
+
+        while (end != std::string::npos) {
+            lines.push_back(newText.substr(start, end - start));
+            start = end + 1;
+            end = newText.find('\n', start);
+        }
+
+        // Add the last line
+        lines.push_back(newText.substr(start));
+
+        // If no text was provided, ensure we have at least one empty line
+        if (lines.empty()) {
+            lines.push_back("");
+        }
+
+        // Set cursor at the end of the text
+        cursorRow = lines.size() - 1;
+        cursorCol = lines[cursorRow].length();
+
+        markDirty();
+    }
+
+    std::string getText() const {
+        std::string result;
+        for (size_t i = 0; i < lines.size(); ++i) {
+            result += lines[i];
+            if (i < lines.size() - 1) {
+                result += '\n';
+            }
+        }
+        return result;
+    }
+
+    void setFont(XftFont* newFont) {
+        font = newFont;
+        if (font) {
+            // Calculate line height based on font metrics
+            lineHeight = font->ascent + font->descent + 2; // +2 for a little extra spacing
+        }
+    }
+
+    void setFocus(bool focus) {
+        focused = focus;
+    }
+
+    bool isFocused() const {
+        return focused;
+    }
+
+    void setBackgroundColor(unsigned long color) {
+        backgroundColor = color;
+    }
+
+    void setBorderColor(unsigned long color) {
+        borderColor = color;
+    }
+
+    void setFocusedBorderColor(unsigned long color) {
+        focusedBorderColor = color;
+    }
+
+    void handleEvent(const Event& event) override {
+        // Check if the point is inside the text area
+        bool isInside = containsPoint(event.getX(), event.getY());
+
+        if (event.getType() == Event::Type::MouseDown && isInside) {
+            std::cerr << "TextArea clicked, setting focus to true" << std::endl;
+            setFocus(true);
+
+            // Set cursor position based on click position
+            setCursorPositionFromMouse(event.getX(), event.getY());
+
+            // Start selection
+            startSelection();
+
+            markDirty();
+        }
+        else if (event.getType() == Event::Type::MouseMove && isInside) {
+            // Update selection while dragging
+            if (event.getNativeEvent().xmotion.state & (Button1Mask | Button2Mask | Button3Mask)) {
+                setCursorPositionFromMouse(event.getX(), event.getY());
+                updateSelection();
+                markDirty();
+            }
+        }
+        else if (event.getType() == Event::Type::MouseUp) {
+            // Finalize selection
+            if (selectionStartRow == cursorRow && selectionStartCol == cursorCol) {
+                clearSelection();
+            }
+            markDirty();
+        }
+        else if (event.getType() == Event::Type::MouseDown && !isInside) {
+            std::cerr << "Click outside TextArea, removing focus" << std::endl;
+            setFocus(false);
+            clearSelection();
+            markDirty(); // Mark as dirty when losing focus
+        }
+
+        // Handle keyboard events if focused
+        if (focused && event.getType() == Event::Type::KeyDown) {
+            std::cerr << "TextArea processing key press event" << std::endl;
+            XKeyEvent keyCopy = event.getNativeEvent().xkey;
+            handleKeyPress(keyCopy);
+            markDirty();
+        }
+
+        // Pass the event to the base class
+        Widget::handleEvent(event);
+    }
+
+    void setCursorPositionFromMouse(int mouseX, int mouseY) {
+        if (!font) return;
+
+        // Get the buffer from the parent class instead of using the member variable directly
+        RenderBuffer* currentBuffer = getBuffer();
+        if (!currentBuffer) return;
+
+        // Adjust for padding and scroll
+        int localX = mouseX - getX() - padding + scrollX;
+        int localY = mouseY - getY() - padding + scrollY * lineHeight;
+
+        // Find the row
+        cursorRow = localY / lineHeight;
+        if (cursorRow < 0) cursorRow = 0;
+        if (cursorRow >= static_cast<int>(lines.size())) {
+            cursorRow = lines.size() - 1;
+        }
+
+        // Find the column by measuring text widths
+        const std::string& line = lines[cursorRow];
+        cursorCol = 0;
+
+        if (localX <= 0) {
+            cursorCol = 0;
+        } else {
+            // Binary search to find the closest character position
+            int left = 0;
+            int right = line.length();
+
+            while (left < right) {
+                int mid = (left + right) / 2;
+                std::string textToMid = line.substr(0, mid);
+
+                int textWidth, textHeight, textAscent, textDescent;
+                currentBuffer->getTextExtents(font, textToMid, textWidth, textHeight, textAscent, textDescent);
+
+                if (textWidth < localX) {
+                    left = mid + 1;
+                } else {
+                    right = mid;
+                }
+            }
+
+            cursorCol = left;
+
+            // Check if we should place cursor before or after the character
+            if (cursorCol > 0) {
+                std::string textBefore = line.substr(0, cursorCol - 1);
+                std::string textAt = line.substr(0, cursorCol);
+
+                int widthBefore, heightBefore, ascentBefore, descentBefore;
+                int widthAt, heightAt, ascentAt, descentAt;
+
+                currentBuffer->getTextExtents(font, textBefore, widthBefore, heightBefore, ascentBefore, descentBefore);
+                currentBuffer->getTextExtents(font, textAt, widthAt, heightAt, ascentAt, descentAt);
+
+                if (localX - widthBefore < widthAt - localX) {
+                    cursorCol--;
+                }
+            }
+        }
+
+        ensureCursorVisible();
+    }
+
+    bool handleKeyPress(XKeyEvent& event) {
+        if (!focused) return false;
+
+        char buffer[32];
+        KeySym keysym;
+        int count = XLookupString(&event, buffer, sizeof(buffer), &keysym, nullptr);
+
+        bool result = false;
+
+        // Check for modifier keys
+        bool ctrlPressed = (event.state & ControlMask);
+        bool shiftPressed = (event.state & ShiftMask);
+
+        // Handle copy/paste shortcuts
+        if (ctrlPressed && !shiftPressed) {
+            if (keysym == XK_c || keysym == XK_C) {
+                // Ctrl+C: Copy
+                copyToClipboard();
+                return true;
+            } else if (keysym == XK_v || keysym == XK_V) {
+                // Ctrl+V: Paste
+                pasteFromClipboard();
+                return true;
+            } else if (keysym == XK_x || keysym == XK_X) {
+                // Ctrl+X: Cut
+                copyToClipboard();
+                deleteSelectedText();
+                return true;
+            } else if (keysym == XK_a || keysym == XK_A) {
+                // Ctrl+A: Select All
+                selectionStartRow = 0;
+                selectionStartCol = 0;
+                selectionEndRow = lines.size() - 1;
+                selectionEndCol = lines[selectionEndRow].length();
+                hasSelection = true;
+                return true;
+            }
+        }
+
+        // Start selection if Shift is pressed and we don't have a selection yet
+        if (shiftPressed && !hasSelection) {
+            startSelection();
+        }
+
+        // Handle navigation keys with selection
+        if (keysym == XK_BackSpace) {
+            if (hasSelection) {
+                deleteSelectedText();
+                result = true;
+            } else {
+                result = handleBackspace();
+            }
+        } else if (keysym == XK_Delete) {
+            if (hasSelection) {
+                deleteSelectedText();
+                result = true;
+            } else {
+                result = handleDelete();
+            }
+        } else if (keysym == XK_Left) {
+            if (ctrlPressed) {
+                // Ctrl+Left: Move to previous word
+                if (cursorCol > 0) {
+                    auto boundaries = findWordBoundaries(cursorRow, cursorCol - 1);
+                    cursorCol = boundaries.first;
+                } else if (cursorRow > 0) {
+                    cursorRow--;
+                    cursorCol = lines[cursorRow].length();
+                }
+            } else {
+                // Regular left arrow
+                if (cursorCol > 0) {
+                    cursorCol--;
+                } else if (cursorRow > 0) {
+                    cursorRow--;
+                    cursorCol = lines[cursorRow].length();
+                }
+            }
+
+            if (shiftPressed) {
+                // Update selection if Shift is pressed
+                updateSelection();
+            } else {
+                // Clear selection if no Shift
+                clearSelection();
+            }
+            result = true;
+        } else if (keysym == XK_Right) {
+            if (ctrlPressed) {
+                // Ctrl+Right: Move to next word
+                if (cursorCol < static_cast<int>(lines[cursorRow].length())) {
+                    auto boundaries = findWordBoundaries(cursorRow, cursorCol);
+                    cursorCol = boundaries.second;
+                } else if (cursorRow < static_cast<int>(lines.size()) - 1) {
+                    cursorRow++;
+                    cursorCol = 0;
+                }
+            } else {
+                // Regular right arrow
+                if (cursorCol < static_cast<int>(lines[cursorRow].length())) {
+                    cursorCol++;
+                } else if (cursorRow < static_cast<int>(lines.size()) - 1) {
+                    cursorRow++;
+                    cursorCol = 0;
+                }
+            }
+
+            if (shiftPressed) {
+                // Update selection if Shift is pressed
+                updateSelection();
+            } else {
+                // Clear selection if no Shift
+                clearSelection();
+            }
+            result = true;
+        } else if (keysym == XK_Up) {
+            if (cursorRow > 0) {
+                cursorRow--;
+                // Adjust column if the new line is shorter
+                cursorCol = std::min(cursorCol, static_cast<int>(lines[cursorRow].length()));
+            }
+
+            if (shiftPressed) {
+                updateSelection();
+            } else {
+                clearSelection();
+            }
+            result = true;
+        } else if (keysym == XK_Down) {
+            if (cursorRow < static_cast<int>(lines.size()) - 1) {
+                cursorRow++;
+                // Adjust column if the new line is shorter
+                cursorCol = std::min(cursorCol, static_cast<int>(lines[cursorRow].length()));
+            }
+
+            if (shiftPressed) {
+                updateSelection();
+            } else {
+                clearSelection();
+            }
+            result = true;
+        } else if (keysym == XK_Home) {
+            cursorCol = 0;
+
+            if (shiftPressed) {
+                updateSelection();
+            } else {
+                clearSelection();
+            }
+            result = true;
+        } else if (keysym == XK_End) {
+            cursorCol = lines[cursorRow].length();
+
+            if (shiftPressed) {
+                updateSelection();
+            } else {
+                clearSelection();
+            }
+            result = true;
+        } else if (keysym == XK_Return || keysym == XK_KP_Enter) {
+            if (hasSelection) {
+                deleteSelectedText();
+            }
+            result = handleEnter();
+        } else if (keysym == XK_Tab) {
+            if (hasSelection) {
+                deleteSelectedText();
+            }
+            result = handleTab();
+        } else if (count > 0 && !ctrlPressed) {
+            // Insert the typed character at cursor position
+            if (hasSelection) {
+                deleteSelectedText();
+            }
+            lines[cursorRow].insert(cursorCol, buffer, count);
+            cursorCol += count;
+            clearSelection();
+            result = true;
+        }
+
+        if (result) {
+            ensureCursorVisible();
+            markDirty();
+        }
+
+        return result;
+    }
+
+void paintToBuffer(Display* display) override {
+    // Get the buffer from the parent class
+    ensureBuffer(display, getWindow());
+    RenderBuffer* currentBuffer = getBuffer();
+    if (!currentBuffer) return;
+
+    int width = getWidth();
+    int height = getHeight();
+
+    // Clear buffer with background color
+    currentBuffer->clear(backgroundColor);
+
+    // Draw border
+    unsigned long currentBorderColor = focused ? focusedBorderColor : borderColor;
+    currentBuffer->drawRectangle(0, 0, width - 1, height - 1, currentBorderColor);
+    std::cerr << "text area paintToBuffer drawRectangle" << std::endl;
+
+    // Initialize font if needed
+    if (!font) {
+        std::cerr << "Warning: No font set for TextArea" << std::endl;
+        return;
+    }
+
+    // Initialize colors if needed
+    if (!textColor) {
+        textColor = currentBuffer->createXftColor(0, 0, 0);  // Black
+    }
+    if (!placeholderColor) {
+        placeholderColor = currentBuffer->createXftColor(128, 128, 128);  // Gray
+    }
+
+    // Rest of the method remains the same, but replace all instances of 'buffer' with 'currentBuffer'
+    // For example:
+    // buffer->drawText(...) becomes currentBuffer->drawText(...)
+
+    // Draw text or placeholder
+    bool isEmpty = lines.size() == 1 && lines[0].empty();
+    XftColor* currentColor = isEmpty ? placeholderColor : textColor;
+
+    if (isEmpty && !placeholder.empty()) {
+        // Draw placeholder text
+        int textWidth, textHeight, textAscent, textDescent;
+        currentBuffer->getTextExtents(font, placeholder, textWidth, textHeight, textAscent, textDescent);
+
+        // Draw text with vertical centering for placeholder
+        int textY = (height + textAscent - textDescent) / 2;
+        currentBuffer->drawText(padding, textY, placeholder, font, currentColor);
+
+        // Draw cursor at beginning if focused
+        if (focused) {
+            currentBuffer->drawLine(padding, padding, padding, 20, currentBorderColor);
+        }
+    } else {
+        // Draw actual text lines
+        int y = padding + font->ascent;
+
+        for (size_t i = scrollY; i < lines.size() && y < height - padding; ++i) {
+            const std::string& line = lines[i];
+
+            // Skip if line is empty and not the current cursor line
+            if (line.empty() && static_cast<int>(i) != cursorRow) {
+                y += lineHeight;
+                continue;
+            }
+
+            // Draw selection background if needed
+            if (hasSelection) {
+                int startRow = std::min(selectionStartRow, selectionEndRow);
+                int endRow = std::max(selectionStartRow, selectionEndRow);
+
+                if (i >= startRow && i <= endRow) {
+                    int startCol = 0;
+                    int endCol = line.length();
+
+                    if (i == startRow) {
+                        startCol = std::min(selectionStartCol, selectionEndCol);
+                    }
+                    if (i == endRow) {
+                        endCol = std::max(selectionStartCol, selectionEndCol);
+                    }
+
+                    if (startCol < endCol) {
+                        std::string textBeforeSelection = line.substr(0, startCol);
+                        std::string selectedText = line.substr(startCol, endCol - startCol);
+
+                        int startX, textHeight, textAscent, textDescent;
+                        int endX;
+
+                        currentBuffer->getTextExtents(font, textBeforeSelection, startX, textHeight, textAscent, textDescent);
+                        currentBuffer->getTextExtents(font, selectedText, endX, textHeight, textAscent, textDescent);
+
+                        startX += padding - scrollX;
+
+                        // Draw selection background
+                        currentBuffer->fillRectangle(startX, y - font->ascent, endX, font->ascent + font->descent, selectionColor);
+                    }
+                }
+            }
+
+            // Draw the line
+            currentBuffer->drawText(padding - scrollX, y, line, font, textColor);
+
+            // Draw cursor if this is the current line and we're focused
+            if (focused && static_cast<int>(i) == cursorRow) {
+                std::string textBeforeCursor = line.substr(0, cursorCol);
+                int cursorX, textHeight, textAscent, textDescent;
+                currentBuffer->getTextExtents(font, textBeforeCursor, cursorX, textHeight, textAscent, textDescent);
+                cursorX += padding - scrollX;  // Add padding and adjust for scroll
+
+                currentBuffer->drawLine(cursorX, y - font->ascent, cursorX, y + font->descent, currentBorderColor);
+            }
+
+            y += lineHeight;
+        }
+
+        // Draw vertical scrollbar if needed
+        drawVerticalScrollbar(currentBuffer, width, height);
+
+        // Draw horizontal scrollbar if needed
+        drawHorizontalScrollbar(currentBuffer, width, height);
+    }
+}
+
+private:
+    // Helper methods for key handling
+    bool handleBackspace() {
+        if (cursorCol > 0) {
+            // Delete character before cursor
+            lines[cursorRow].erase(cursorCol - 1, 1);
+            cursorCol--;
+            return true;
+        } else if (cursorRow > 0) {
+            // Join with previous line
+            cursorCol = lines[cursorRow - 1].length();
+            lines[cursorRow - 1] += lines[cursorRow];
+            lines.erase(lines.begin() + cursorRow);
+            cursorRow--;
+            return true;
+        }
+        return false;
+    }
+
+    bool handleDelete() {
+        if (cursorCol < static_cast<int>(lines[cursorRow].length())) {
+            // Delete character at cursor
+            lines[cursorRow].erase(cursorCol, 1);
+            return true;
+        } else if (cursorRow < static_cast<int>(lines.size()) - 1) {
+            // Join with next line
+            lines[cursorRow] += lines[cursorRow + 1];
+            lines.erase(lines.begin() + cursorRow + 1);
+            return true;
+        }
+        return false;
+    }
+
+    bool handleLeftArrow() {
+        if (cursorCol > 0) {
+            cursorCol--;
+            return true;
+        } else if (cursorRow > 0) {
+            cursorRow--;
+            cursorCol = lines[cursorRow].length();
+            return true;
+        }
+        return false;
+    }
+
+    bool handleRightArrow() {
+        if (cursorCol < static_cast<int>(lines[cursorRow].length())) {
+            cursorCol++;
+            return true;
+        } else if (cursorRow < static_cast<int>(lines.size()) - 1) {
+            cursorRow++;
+            cursorCol = 0;
+            return true;
+        }
+        return false;
+    }
+
+    bool handleUpArrow() {
+        if (cursorRow > 0) {
+            cursorRow--;
+            // Adjust column if the new line is shorter
+            cursorCol = std::min(cursorCol, static_cast<int>(lines[cursorRow].length()));
+            return true;
+        }
+        return false;
+    }
+
+    bool handleDownArrow() {
+        if (cursorRow < static_cast<int>(lines.size()) - 1) {
+            cursorRow++;
+            // Adjust column if the new line is shorter
+            cursorCol = std::min(cursorCol, static_cast<int>(lines[cursorRow].length()));
+            return true;
+        }
+        return false;
+    }
+
+    bool handleEnter() {
+        // Split the current line at cursor position
+        std::string currentLine = lines[cursorRow];
+        std::string newLine = currentLine.substr(cursorCol);
+        lines[cursorRow] = currentLine.substr(0, cursorCol);
+
+        // Insert the new line after the current one
+        lines.insert(lines.begin() + cursorRow + 1, newLine);
+
+        // Move cursor to the beginning of the new line
+        cursorRow++;
+        cursorCol = 0;
+        return true;
+    }
+
+    bool handleTab() {
+        // Insert 2 spaces for a tab
+        const std::string tabSpaces = "  ";
+        lines[cursorRow].insert(cursorCol, tabSpaces);
+        cursorCol += tabSpaces.length();
+        return true;
+    }
+
+    void ensureCursorVisible() {
+        if (!font) return;
+
+        // Calculate visible area
+        int visibleWidth = getWidth() - 2 * padding;
+        int visibleHeight = getHeight() - 2 * padding;
+        int visibleLines = visibleHeight / lineHeight;
+
+        // Vertical scrolling
+        if (cursorRow < scrollY) {
+            scrollY = cursorRow;
+        } else if (cursorRow >= scrollY + visibleLines) {
+            scrollY = cursorRow - visibleLines + 1;
+        }
+
+        // Horizontal scrolling - need to calculate text width
+        if (cursorCol > 0) {
+            std::string textBeforeCursor = lines[cursorRow].substr(0, cursorCol);
+            int textWidth, textHeight, textAscent, textDescent;
+
+            RenderBuffer* currentBuffer = getBuffer();
+            if (currentBuffer) {
+                currentBuffer->getTextExtents(font, textBeforeCursor, textWidth, textHeight, textAscent, textDescent);
+
+                if (textWidth < scrollX) {
+                    scrollX = std::max(0, textWidth - visibleWidth / 4);
+                } else if (textWidth > scrollX + visibleWidth) {
+                    scrollX = textWidth - visibleWidth + 10; // 10px buffer
+                }
+            }
+        } else {
+            // If cursor is at the beginning, scroll to the start
+            if (cursorCol == 0) {
+                scrollX = 0;
+            }
+        }
+    }
+
+    // Add methods for selection
+    void startSelection() {
+        hasSelection = true;
+        selectionStartRow = cursorRow;
+        selectionStartCol = cursorCol;
+        selectionEndRow = cursorRow;
+        selectionEndCol = cursorCol;
+    }
+
+    void updateSelection() {
+        selectionEndRow = cursorRow;
+        selectionEndCol = cursorCol;
+    }
+
+    void clearSelection() {
+        hasSelection = false;
+    }
+
+    bool isPositionSelected(int row, int col) {
+        if (!hasSelection) return false;
+
+        // Normalize selection coordinates
+        int startRow = std::min(selectionStartRow, selectionEndRow);
+        int endRow = std::max(selectionStartRow, selectionEndRow);
+        int startCol = (startRow == selectionStartRow) ? selectionStartCol : selectionEndCol;
+        int endCol = (endRow == selectionEndRow) ? selectionEndCol : selectionStartCol;
+
+        if (startRow == endRow) {
+            // Selection on single line
+            startCol = std::min(selectionStartCol, selectionEndCol);
+            endCol = std::max(selectionStartCol, selectionEndCol);
+            return (row == startRow && col >= startCol && col < endCol);
+        }
+
+        // Selection spans multiple lines
+        if (row < startRow || row > endRow) return false;
+        if (row == startRow) return col >= startCol;
+        if (row == endRow) return col < endCol;
+        return true;
+    }
+    // Copy selected text to clipboard
+    void copyToClipboard() {
+        if (!hasSelection) return;
+
+        // Get selected text
+        std::string selectedText = getSelectedText();
+        if (selectedText.empty()) return;
+
+        // Store the text for later paste requests
+        clipboardText = selectedText;
+
+        // For a more complete implementation, you would need to integrate with the X11 clipboard
+        // This simplified version just stores text internally
+    }
+
+    // Get text from clipboard
+    void pasteFromClipboard() {
+        // For a more complete implementation, you would need to integrate with the X11 clipboard
+        // This simplified version just uses the internally stored text
+
+        if (!clipboardText.empty()) {
+            insertText(clipboardText);
+        }
+    }
+
+    // Insert text at current cursor position
+    void insertText(const std::string& text) {
+        // Delete selected text if there's a selection
+        if (hasSelection) {
+            deleteSelectedText();
+        }
+
+        // Split the text by newlines
+        size_t start = 0;
+        size_t end = text.find('\n');
+
+        // Insert first segment on current line
+        lines[cursorRow].insert(cursorCol, text.substr(start, end == std::string::npos ? end : end - start));
+        cursorCol += (end == std::string::npos ? text.length() : end - start);
+
+        // Process remaining lines if any
+        while (end != std::string::npos) {
+            start = end + 1;
+            end = text.find('\n', start);
+
+            // Create a new line
+            handleEnter();
+
+            // Add text to the new line
+            std::string segment = text.substr(start, end == std::string::npos ? end : end - start);
+            lines[cursorRow].insert(cursorCol, segment);
+            cursorCol += segment.length();
+        }
+
+        markDirty();
+    }
+
+    // Delete selected text
+    void deleteSelectedText() {
+        if (!hasSelection) return;
+
+        // Normalize selection coordinates
+        int startRow = std::min(selectionStartRow, selectionEndRow);
+        int endRow = std::max(selectionStartRow, selectionEndRow);
+        int startCol, endCol;
+
+        if (startRow == endRow) {
+            startCol = std::min(selectionStartCol, selectionEndCol);
+            endCol = std::max(selectionStartCol, selectionEndCol);
+
+            // Delete text on single line
+            lines[startRow].erase(startCol, endCol - startCol);
+        } else {
+            // Handle multi-line selection
+            startCol = (startRow == selectionStartRow) ? selectionStartCol : selectionEndCol;
+            endCol = (endRow == selectionEndRow) ? selectionEndCol : selectionStartCol;
+
+            // Keep the start of the first line and the end of the last line
+            std::string startText = lines[startRow].substr(0, startCol);
+            std::string endText = lines[endRow].substr(endCol);
+
+            // Combine them
+            lines[startRow] = startText + endText;
+
+            // Remove the lines in between
+            lines.erase(lines.begin() + startRow + 1, lines.begin() + endRow + 1);
+        }
+
+        // Move cursor to start of selection
+        cursorRow = startRow;
+        cursorCol = startCol;
+
+        // Clear selection
+        clearSelection();
+        markDirty();
+    }
+
+    // Get selected text
+    std::string getSelectedText() const {
+        if (!hasSelection) return "";
+
+        // Normalize selection coordinates
+        int startRow = std::min(selectionStartRow, selectionEndRow);
+        int endRow = std::max(selectionStartRow, selectionEndRow);
+        int startCol, endCol;
+
+        std::string result;
+
+        if (startRow == endRow) {
+            startCol = std::min(selectionStartCol, selectionEndCol);
+            endCol = std::max(selectionStartCol, selectionEndCol);
+
+            // Get text from single line
+            result = lines[startRow].substr(startCol, endCol - startCol);
+        } else {
+            // Handle multi-line selection
+            startCol = (startRow == selectionStartRow) ? selectionStartCol : selectionEndCol;
+            endCol = (endRow == selectionEndRow) ? selectionEndCol : selectionStartCol;
+
+            // First line
+            result = lines[startRow].substr(startCol);
+            result += '\n';
+
+            // Middle lines
+            for (int i = startRow + 1; i < endRow; i++) {
+                result += lines[i] + '\n';
+            }
+
+            // Last line
+            result += lines[endRow].substr(0, endCol);
+        }
+
+        return result;
+    }
+
+    // Find word boundaries (for Ctrl+Shift selection)
+    std::pair<int, int> findWordBoundaries(int row, int col) {
+        const std::string& line = lines[row];
+        int start = col;
+        int end = col;
+
+        // Define what characters are part of a word
+        auto isWordChar = [](char c) {
+            return std::isalnum(c) || c == '_';
+        };
+
+        // Find start of word
+        while (start > 0 && isWordChar(line[start - 1])) {
+            start--;
+        }
+
+        // Find end of word
+        while (end < static_cast<int>(line.length()) && isWordChar(line[end])) {
+            end++;
+        }
+
+        return {start, end};
+    }
+
+    // Draw vertical scrollbar
+    void drawVerticalScrollbar(RenderBuffer* buffer, int width, int height) {
+        int totalLines = lines.size();
+        int visibleLines = (height - 2 * padding) / lineHeight;
+
+        // Only draw scrollbar if we have more lines than can be displayed
+        if (totalLines <= visibleLines) return;
+
+        // Calculate scrollbar dimensions
+        int scrollbarHeight = height - 2 * padding;
+        int scrollbarX = width - scrollbarWidth - padding / 2;
+        int scrollbarY = padding;
+
+        // Draw scrollbar background
+        buffer->fillRectangle(scrollbarX, scrollbarY, scrollbarWidth, scrollbarHeight, scrollbarColor);
+
+        // Calculate thumb position and size
+        float thumbRatio = static_cast<float>(visibleLines) / totalLines;
+        int thumbHeight = std::max(scrollbarMinLength, static_cast<int>(scrollbarHeight * thumbRatio));
+        int thumbY = scrollbarY + static_cast<int>((scrollbarHeight - thumbHeight) *
+                                                  (static_cast<float>(scrollY) / (totalLines - visibleLines)));
+
+        // Draw thumb
+        buffer->fillRectangle(scrollbarX, thumbY, scrollbarWidth, thumbHeight, scrollbarThumbColor);
+    }
+
+    // Draw horizontal scrollbar
+    void drawHorizontalScrollbar(RenderBuffer* buffer, int width, int height) {
+        // Find the maximum line width
+        int maxLineWidth = 0;
+        for (const auto& line : lines) {
+            int lineWidth, textHeight, textAscent, textDescent;
+            buffer->getTextExtents(font, line, lineWidth, textHeight, textAscent, textDescent);
+            maxLineWidth = std::max(maxLineWidth, lineWidth);
+        }
+
+        int visibleWidth = width - 2 * padding - scrollbarWidth;
+
+        // Only draw scrollbar if content is wider than visible area
+        if (maxLineWidth <= visibleWidth) return;
+
+        // Calculate scrollbar dimensions
+        int scrollbarWidth = width - 2 * padding - this->scrollbarWidth;  // Adjust for vertical scrollbar
+        int scrollbarHeight = this->scrollbarWidth;
+        int scrollbarX = padding;
+        int scrollbarY = height - scrollbarHeight - padding / 2;
+
+        // Draw scrollbar background
+        buffer->fillRectangle(scrollbarX, scrollbarY, scrollbarWidth, scrollbarHeight, scrollbarColor);
+
+        // Calculate thumb position and size
+        float thumbRatio = static_cast<float>(visibleWidth) / maxLineWidth;
+        int thumbWidth = std::max(scrollbarMinLength, static_cast<int>(scrollbarWidth * thumbRatio));
+        int thumbX = scrollbarX + static_cast<int>((scrollbarWidth - thumbWidth) *
+                                                  (static_cast<float>(scrollX) / (maxLineWidth - visibleWidth)));
+
+        // Draw thumb
+        buffer->fillRectangle(thumbX, scrollbarY, thumbWidth, scrollbarHeight, scrollbarThumbColor);
+    }
+};
+```
+
+---
+
 ### Файл: `src/ui/text_field.cppm`
 
 ```cpp
@@ -1563,6 +3161,7 @@ export module ui.text_field;
 
 import ui.widget;
 import ui.render_buffer;
+import ui.event;
 
 export class TextField : public Widget {
 private:
@@ -1640,6 +3239,37 @@ public:
         focusedBorderColor = color;
     }
 
+    // Добавьте этот метод перед paintToBuffer
+    void handleEvent(const Event& event) override {
+        // Проверяем, находится ли точка внутри текстового поля
+        bool isInside = containsPoint(event.getX(), event.getY());
+
+        if (event.getType() == Event::Type::MouseDown && isInside) {
+            std::cerr << "TextField clicked, setting focus to true" << std::endl;
+            setFocus(true);
+            markDirty(); // Отмечаем как грязный при получении фокуса
+
+            // Здесь можно добавить логику для установки позиции курсора
+            // в зависимости от позиции клика
+        }
+        else if (event.getType() == Event::Type::MouseDown && !isInside) {
+            std::cerr << "Click outside TextField, removing focus" << std::endl;
+            setFocus(false);
+            markDirty(); // Отмечаем как грязный при потере фокуса
+        }
+
+        // Обрабатываем клавиатурные события, если в фокусе
+        if (focused && event.getType() == Event::Type::KeyDown) {
+            std::cerr << "TextField processing key press event" << std::endl;
+            XKeyEvent keyCopy = event.getNativeEvent().xkey;
+            handleKeyPress(keyCopy);
+            markDirty();
+        }
+
+        // Передаем событие базовому классу
+        Widget::handleEvent(event);
+    }
+
     bool handleKeyPress(XKeyEvent& event) {
         if (!focused) return false;
 
@@ -1683,16 +3313,15 @@ public:
 
         return false;
     }
+    // Replace the render() and draw() methods with paintToBuffer()
+    void paintToBuffer(Display* display) override {
+        // Get the buffer from the parent class
+        ensureBuffer(display, getWindow());
+        RenderBuffer* buffer = getBuffer();
+        if (!buffer) return;
 
-    // Widget implementation
-    void render(Display* display, Window window) override {
         int width = getWidth();
         int height = getHeight();
-
-        // Resize buffer if needed
-        if (!buffer || buffer->getWidth() != width || buffer->getHeight() != height) {
-            buffer = std::make_unique<RenderBuffer>(display, window, width, height);
-        }
 
         // Clear buffer with background color
         buffer->clear(backgroundColor);
@@ -1700,6 +3329,7 @@ public:
         // Draw border
         unsigned long currentBorderColor = focused ? focusedBorderColor : borderColor;
         buffer->drawRectangle(0, 0, width - 1, height - 1, currentBorderColor);
+        std::cerr << "text field paintToBuffer drawRectangle" << std::endl;
 
         // Initialize font if needed
         if (!font) {
@@ -1739,13 +3369,6 @@ public:
                 // Draw cursor at beginning when text is empty
                 buffer->drawLine(padding, padding, padding, height - padding, currentBorderColor);
             }
-        }
-    }
-
-    void draw(Display* display, Window window) {
-        render(display, window);
-        if (buffer) {
-            buffer->copyToWindow(window, getX(), getY());
         }
     }
 };

@@ -18,6 +18,7 @@ import ui.button;
 import ui.text_field;
 import ui.text_area;
 import ui.file_browser;
+import ui.image;
 import ui.event;
 import ui.event_listener;
 
@@ -29,7 +30,7 @@ int main() {
         auto app = std::make_shared<Application>();
 
         // Create main window
-        if (!app->createMainWindow("file browser", 900, 500)) {
+        if (!app->createMainWindow("file browser", 900, 900)) {
             std::cerr << "Failed to create main window" << std::endl;
             return 1;
         }
@@ -74,6 +75,18 @@ int main() {
         auto fileBrowser = std::make_shared<FileBrowser>(320, 50, 450, 370, "/home");
         fileBrowser->setVisible(true);
         fileBrowser->markDirty();
+
+        // Create an image widget
+        try {
+    		auto image = std::make_shared<Image>("image1", 500, 500, 200, 150,
+      			"/home/jenya/Pictures/jenya239_greyhounds_nebula_starlight_dc31de9a-2bc0-474d-b783-f762dc48bd25.png");
+    		image->setVisible(true);
+    		image->markDirty();
+    		mainWindow->addChild(image);
+    		logger->info("Image widget added successfully");
+		} catch (const std::exception& e) {
+    		logger->error("Failed to create image widget: " + std::string(e.what()));
+		}
 
         getFileSelectedSignal()->connect([logger, textArea](const auto& payload) {
             if (!payload.isDirectory) {
