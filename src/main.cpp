@@ -20,6 +20,7 @@ import ui.button;
 import ui.text_field;
 import ui.text_area;
 import ui.file_browser;
+import ui.video_player.video_player;
 import ui.image;
 import ui.event;
 import ui.event_listener;
@@ -87,6 +88,11 @@ int main() {
         auto textArea = std::make_shared<TextArea>(50, 170, 250, 150, "Enter multi-line text here...");
         textArea->setVisible(true);
         textArea->markDirty();
+
+        // Create a video player widget
+        auto videoPlayer = std::make_shared<VideoPlayer>("video1", 50, 350, 250, 150, "/path/to/your/video.mp4");
+        videoPlayer->setVisible(true);
+        videoPlayer->markDirty();
 
         // Create a file browser
         auto fileBrowser = std::make_shared<FileBrowser>(320, 50, 450, 370, "/home");
@@ -159,6 +165,9 @@ getFileSelectedSignal()->connect([logger, textArea, imageWidget](const auto& pay
             textArea->setText(content);
             textArea->markDirty();
             logger->info("Loaded file content: " + std::to_string(content.size()) + " bytes");
+        } catch (const std::bad_alloc& e) {
+            logger->error("Memory allocation failed when loading file: " + std::string(e.what()));
+            textArea->setText("Error: Out of memory when loading file");
         } catch (const std::exception& e) {
             logger->error("Error loading file: " + std::string(e.what()));
             textArea->setText("Error loading file: " + std::string(e.what()));
@@ -178,6 +187,7 @@ getFileSelectedSignal()->connect([logger, textArea, imageWidget](const auto& pay
                 textField->setFont(font);
                 textArea->setFont(font);
                 fileBrowser->setFont(font);
+                videoPlayer->setFont(font);
                 logger->info("Font set for TextField");
             } else {
                 logger->error("Failed to load font for TextField");
@@ -188,6 +198,7 @@ getFileSelectedSignal()->connect([logger, textArea, imageWidget](const auto& pay
         mainWindow->addChild(button);
         mainWindow->addChild(textField);
         mainWindow->addChild(textArea);
+        mainWindow->addChild(videoPlayer);
         mainWindow->addChild(fileBrowser);
 
         // Create a custom event listener for text field focus
