@@ -9,7 +9,12 @@ xft_flags = `pkg-config --cflags xft`.strip
 x11_flags = `pkg-config --cflags x11`.strip
 imlib2_flags = `pkg-config --cflags imlib2`.strip
 imlib2_libs = `pkg-config --libs imlib2`.strip
-compile_flags = "#{freetype_flags} #{xft_flags} #{x11_flags} #{imlib2_flags} -lX11 -lXft -lfreetype #{imlib2_libs}"
+
+# Add FFmpeg flags
+ffmpeg_cflags = `pkg-config --cflags libavcodec libavformat libswscale libavutil`.strip
+ffmpeg_libs = `pkg-config --libs libavcodec libavformat libswscale libavutil`.strip
+
+compile_flags = "#{freetype_flags} #{xft_flags} #{x11_flags} #{imlib2_flags} #{ffmpeg_cflags} -lX11 -lXft -lfreetype #{imlib2_libs} #{ffmpeg_libs}"
 
 # puts compile_flags
 # exit

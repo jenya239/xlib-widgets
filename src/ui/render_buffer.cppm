@@ -307,4 +307,20 @@ public:
         // Free the GC
         XFreeGC(display, gc);
     }
+
+    // Рисование закрашенного многоугольника
+    void fillPolygon(int* xPoints, int* yPoints, int nPoints, unsigned long color) {
+        if (!valid || nPoints < 3) return;
+
+        XPoint* points = new XPoint[nPoints];
+        for (int i = 0; i < nPoints; i++) {
+            points[i].x = xPoints[i];
+            points[i].y = yPoints[i];
+        }
+
+        XSetForeground(display, gc, color);
+        XFillPolygon(display, pixmap, gc, points, nPoints, Complex, CoordModeOrigin);
+
+        delete[] points;
+    }
 };

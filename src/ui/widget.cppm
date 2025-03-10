@@ -312,7 +312,7 @@ public:
         }
     }
 
-    void setWidth(unsigned int newWidth) {
+    virtual void setWidth(unsigned int newWidth) {
         if (this->width != newWidth) {
             this->width = newWidth;
 
@@ -325,7 +325,7 @@ public:
         }
     }
 
-    void setHeight(unsigned int newHeight) {
+    virtual void setHeight(unsigned int newHeight) {
         if (this->height != newHeight) {
             this->height = newHeight;
 
