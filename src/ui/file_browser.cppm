@@ -121,39 +121,86 @@ public:
         }
 
         try {
-            // Add directories first
+            // Ограничение на количество файлов
+            const size_t MAX_FILES = 500;
+
+            // Создаем временные векторы для директорий и файлов
+            std::vector<FileEntry> directories;
+            std::vector<FileEntry> files;
+
+            // Собираем все директории и файлы
             for (const auto& entry : std::filesystem::directory_iterator(currentPath)) {
-                if (entry.is_directory()) {
-                    entries.emplace_back(entry.path().filename().string(), true);
+                try {
+                    std::string filename = entry.path().filename().string();
+                    bool isDir = false;
+
+                    // Безопасная проверка, является ли элемент директорией
+                    try {
+                        isDir = entry.is_directory();
+                    } catch (const std::filesystem::filesystem_error& e) {
+                        // Пропускаем файлы, к которым нет доступа
+                        continue;
+                    }
+
+                    if (isDir) {
+                        directories.emplace_back(filename, true);
+                    } else {
+                        files.emplace_back(filename, false);
+                    }
+
+                    // Проверяем, не превысили ли мы лимит
+                    if (directories.size() + files.size() >= MAX_FILES) {
+                        break;
+                    }
+                } catch (const std::exception& e) {
+                    // Пропускаем файлы, которые вызывают исключения
+                    continue;
                 }
             }
 
-            // Then add files
-            for (const auto& entry : std::filesystem::directory_iterator(currentPath)) {
-                if (!entry.is_directory()) {
-                    entries.emplace_back(entry.path().filename().string(), false);
-                }
+            // Сортируем директории и файлы
+            std::sort(directories.begin(), directories.end(),
+                     [](const FileEntry& a, const FileEntry& b) {
+                         return a.name < b.name;
+                     });
+
+            std::sort(files.begin(), files.end(),
+                     [](const FileEntry& a, const FileEntry& b) {
+                         return a.name < b.name;
+                     });
+
+            // Сначала добавляем директории, затем файлы
+            entries.insert(entries.end(), directories.begin(), directories.end());
+            entries.insert(entries.end(), files.begin(), files.end());
+
+            // Обновляем индекс выбранного элемента
+            if (!entries.empty()) {
+                selectedIndex = 0;
+            } else {
+                selectedIndex = -1;
             }
 
-            // Sort entries alphabetically within their groups
-            auto dirEnd = std::partition(entries.begin(), entries.end(),
-                [](const FileEntry& e) { return e.isDirectory; });
-
-            std::sort(entries.begin(), dirEnd,
-                [](const FileEntry& a, const FileEntry& b) {
-                    if (a.isParentDir) return true;
-                    if (b.isParentDir) return false;
-                    return a.name < b.name;
-                });
-
-            std::sort(dirEnd, entries.end(),
-                [](const FileEntry& a, const FileEntry& b) {
-                    return a.name < b.name;
-                });
+            // Обновляем начальный индекс для прокрутки
+            scrollOffset = 0;
+        } catch (const std::filesystem::filesystem_error& e) {
+            // Обработка ошибок доступа к директории
+            entries.clear();
+            if (currentPath.has_parent_path()) {
+                // Возвращаемся к родительской директории
+                currentPath = currentPath.parent_path();
+                // Рекурсивно обновляем список файлов для родительской директории
+                refreshEntries();
+            }
+        } catch (const std::exception& e) {
+            // Обработка других исключений
+            entries.clear();
+            if (currentPath.has_parent_path()) {
+                currentPath = currentPath.parent_path();
+                refreshEntries();
+            }
         }
-        catch (const std::filesystem::filesystem_error& e) {
-            std::cerr << "Error accessing directory: " << e.what() << std::endl;
-        }
+
+        markDirty();
     }
 
     void handleEvent(const Event& event) override {

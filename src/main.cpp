@@ -38,6 +38,20 @@ bool isImageFile(const std::string& filePath) {
     return std::find(imageExtensions.begin(), imageExtensions.end(), extension) != imageExtensions.end();
 }
 
+// Add this function to check if a file is a video file
+bool isVideoFile(const std::string& filePath) {
+    // Check file extension
+    std::string extension = filePath.substr(filePath.find_last_of(".") + 1);
+    std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+
+    // List of common video extensions
+    const std::vector<std::string> videoExtensions = {
+        "mp4", "avi", "mkv", "mov", "wmv", "flv", "webm", "m4v", "mpg", "mpeg"
+    };
+
+    return std::find(videoExtensions.begin(), videoExtensions.end(), extension) != videoExtensions.end();
+}
+
 int main() {
   	std::shared_ptr<Image> imageWidget;
 
@@ -97,6 +111,7 @@ int main() {
         // Create a file browser
         auto fileBrowser = std::make_shared<FileBrowser>(320, 50, 450, 370, "/home");
         fileBrowser->setVisible(true);
+        fileBrowser->setFocus(true);
         fileBrowser->markDirty();
 
         try {
@@ -110,7 +125,7 @@ int main() {
         	logger->error("Failed to create image widget: " + std::string(e.what()));
     	}
 
-getFileSelectedSignal()->connect([logger, textArea, imageWidget](const auto& payload) {
+getFileSelectedSignal()->connect([logger, textArea, imageWidget, videoPlayer](const auto& payload) {
     // First check if it's a directory - if so, we don't need to do anything with the image or text area
     if (payload.isDirectory) {
         logger->info("Directory selected: " + payload.filePath);
@@ -130,15 +145,32 @@ getFileSelectedSignal()->connect([logger, textArea, imageWidget](const auto& pay
                 logger->error("Failed to update image: " + std::string(e.what()));
             }
         }
-    } else {
-        logger->info("Text file selected: " + payload.filePath);
+    }
+    else if (isVideoFile(payload.filePath)) {
+        logger->info("Video file selected: " + payload.filePath);
+
+        // Update the video player with the new video
+        if (videoPlayer) {
+            try {
+                videoPlayer->setVideoPath(payload.filePath);
+                logger->info("Video updated successfully");
+            } catch (const std::exception& e) {
+                logger->error("Failed to update video: " + std::string(e.what()));
+            }
+        }
+    }
+    else {
+        std::string filePath = payload.filePath;
+        logger->info("Text file selected: " + filePath);
 
         // Try to load file content into text area if it's not too large
         try {
             // Check file size first
-            std::ifstream file(payload.filePath, std::ios::binary | std::ios::ate);
+            std::ifstream file(filePath, std::ios::binary | std::ios::ate);
             if (!file.is_open()) {
-                logger->error("Failed to open file: " + payload.filePath);
+                logger->error("Failed to open file: " + filePath);
+        		textArea->setText("Error: Could not open file");
+        		textArea->markDirty();
                 return;
             }
 
@@ -148,29 +180,40 @@ getFileSelectedSignal()->connect([logger, textArea, imageWidget](const auto& pay
             // Only load if file is smaller than 100KB
             const size_t maxFileSize = 100 * 1024;
             if (fileSize > maxFileSize) {
-                logger->info("File too large to display: " + payload.filePath +
+                logger->info("File too large to display: " + filePath +
                             " (" + std::to_string(fileSize) + " bytes)");
-                textArea->setText("File too large to display");
+                textArea->setText("File too large to display" + filePath);
+                textArea->markDirty();
                 return;
             }
 
             // Reset file pointer to beginning
             file.seekg(0, std::ios::beg);
 
-            // Read the file content
-            std::string content((std::istreambuf_iterator<char>(file)),
-                            std::istreambuf_iterator<char>());
+    		// Read file content with a fixed buffer size
+    		std::string content;
+    		content.reserve(static_cast<size_t>(fileSize) + 1); // Pre-allocate memory
 
-            // Set text area content
-            textArea->setText(content);
-            textArea->markDirty();
+    		const size_t bufferSize = 4096;
+    		char buffer[bufferSize];
+
+    		while (file) {
+        		file.read(buffer, bufferSize);
+        		content.append(buffer, file.gcount());
+    		}
+
+    		// Set text area content
+    		textArea->setText(content);
+    		textArea->markDirty();
             logger->info("Loaded file content: " + std::to_string(content.size()) + " bytes");
         } catch (const std::bad_alloc& e) {
             logger->error("Memory allocation failed when loading file: " + std::string(e.what()));
             textArea->setText("Error: Out of memory when loading file");
+            textArea->markDirty();
         } catch (const std::exception& e) {
             logger->error("Error loading file: " + std::string(e.what()));
             textArea->setText("Error loading file: " + std::string(e.what()));
+            textArea->markDirty();
         }
     }
 });
